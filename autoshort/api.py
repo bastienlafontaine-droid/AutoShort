@@ -105,6 +105,9 @@ def details(rid:str):
     info['progress']=guided.progress(info,folder)
     if not guided.is_auto(folder) and live.enabled(folder):
         w=live.snapshot(folder)
+        if w['stage']=='images':
+            w['measured_shots']=live.measured_shots(folder,w)
+            w['video_catalog']=live.available_videos(folder,w)
         info['progress']={'auto':False,'number':live.STAGES.index(w['stage'])+1,'live':w}
         if any(j['kind']=='research' and j['status'] in ('queued','running') for j in w['jobs']):info['progress']['number']=1
     return info
@@ -130,7 +133,7 @@ def resume(rid:str):
 @app.get('/api/runs/{rid}/files/{name}')
 def file(rid:str,name:str):
     existing(rid)
-    if name not in ('video.mp4','cover.jpg','subtitles.srt','script.md','sources.json','manifest.json','quality_report.html','contact_sheet.jpg','timeline.json','description.txt','technical_report.json','final_visual_review.json'):
+    if name not in ('video.mp4','cover.jpg','subtitles.srt','script.md','sources.json','manifest.json','quality_report.html','contact_sheet.jpg','timeline.json','shot_timeline.json','description.txt','technical_report.json','final_visual_review.json'):
         raise HTTPException(404)
     p=DATA/'runs'/rid/'export'/name
     if not p.is_file():raise HTTPException(404)
@@ -214,3 +217,42 @@ def proposal_image(rid:str,pid:str):
         live.check_image(folder,p['data'])
     except (ValueError,KeyError):raise HTTPException(404)
     return FileResponse(p['data']['path'],media_type='image/png')
+
+class ShotSettings(BaseModel):
+    shot_id: str
+    camera_movement: str
+    media_type: str = 'animated_image'
+
+@app.post('/api/runs/{rid}/shot-settings')
+def shot_settings(rid: str, body: ShotSettings):
+    return live_action(rid, live.configure_shot, body.shot_id, body.camera_movement, body.media_type)
+
+class VideoRequest(BaseModel):
+    shot_id: str
+    prompt: str = Field(min_length=1,max_length=1000)
+
+class VideoChoice(BaseModel):
+    shot_id: str
+    job_id: str
+
+@app.post('/api/runs/{rid}/generate-video')
+def generate_video(rid: str, body: VideoRequest):
+    return {'id':live_action(rid,live.schedule_video,body.shot_id,body.prompt)}
+
+@app.post('/api/runs/{rid}/choose-video')
+def choose_video(rid: str, body: VideoChoice):
+    live_action(rid,live.select_video,body.shot_id,body.job_id)
+    return {'ok':True}
+
+@app.get('/api/runs/{rid}/proposal-video/{jid}')
+def preview_video(rid: str,jid: str):
+    existing(rid)
+    folder=DATA/'runs'/rid
+    w=live.snapshot(folder)
+    job=next((j for j in w['jobs'] if j['id']==jid and j['kind']=='video' and j['status']=='done'),None)
+    if job is None:raise HTTPException(404)
+    try:
+        result=read(folder/'live_results'/f'{jid}.json')
+        live.check_video(folder,result)
+    except (ValueError,OSError,KeyError):raise HTTPException(404)
+    return FileResponse(result['path'],media_type='video/mp4')

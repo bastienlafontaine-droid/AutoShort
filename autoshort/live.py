@@ -22,7 +22,7 @@ def enabled(folder):return read(folder/'request.json').get('guided_version')==2
 
 def initial():
     return {'version':2,'revision':0,'stage':'ideas','jobs':[],'proposals':{s:[] for s in STAGES},
-            'chosen':{},'image_choices':{},'rejected':{},'message':'','prompts':PROMPTS}
+            'chosen':{},'image_choices':{},'shot_overrides':{},'video_choices':{},'rejected':{},'message':'','prompts':PROMPTS}
 
 @contextmanager
 def transaction(folder):
@@ -108,7 +108,16 @@ def choose(folder,rid,stage,pid):
     with transaction(folder) as w:
         require_active(w,stage);p=proposal(w,stage,pid)
         if stage=='images':
-            check_image(folder,p['data']);w['image_choices'][str(p['target'])]=pid;return
+            check_image(folder,p['data'])
+            old=w['image_choices'].get(str(p['target']))
+            if old!=pid:
+                for shot_id in list(w.get('video_choices',{})):
+                    if int(shot_id[1:3])==p['target']:
+                        w['video_choices'].pop(shot_id,None)
+                for shot_id,setting in w.get('shot_overrides',{}).items():
+                    if int(shot_id[1:3])==p['target'] and setting.get('media_type')=='generated_video':
+                        setting['media_type']='animated_image'
+            w['image_choices'][str(p['target'])]=pid;return
         if stage=='ideas' and pid in w['rejected']:raise ValueError('Ce sujet a ete rejete; choisir une autre idee.')
         cancel_background(w,stage);w['chosen'][stage]=pid;w['message']=''
         if stage=='ideas':
@@ -127,6 +136,96 @@ def choose(folder,rid,stage,pid):
         else:raise ValueError('Etape inconnue.')
         wake(rid)
 
+VALID_MOVEMENTS={'push_in','pull_out','pan_left','pan_right','tilt_up','tilt_down','diagonal','still','reveal'}
+VALID_MEDIA={'animated_image','generated_video','archive_image','archive_video'}
+
+def configure_shot(folder,rid,shot_id,movement,media_type):
+    """Human overrides stay durable and never regenerate an accepted image."""
+    import re
+    with transaction(folder) as w:
+        require_active(w,'images')
+        if not re.fullmatch(r's[0-9]{2}-p0[1-3]',shot_id):
+            raise ValueError('Identifiant de plan invalide.')
+        board=proposal(w,'storyboard',w['chosen']['storyboard'])['data']['script']
+        scene=int(shot_id[1:3])
+        if scene not in [s['id'] for s in board['scenes']]:
+            raise ValueError('Scene inconnue.')
+        if movement not in VALID_MOVEMENTS or media_type not in VALID_MEDIA:
+            raise ValueError('Mouvement ou type de media invalide.')
+        # Archive media require a verified import; do not mislabel synthetic art.
+        if media_type.startswith('archive_'):
+            raise ValueError('Importer et verifier une archive avant de la selectionner.')
+        known={x['shot_id'] for x in measured_shots(folder,w)}
+        if known and shot_id not in known:
+            raise ValueError('Plan absent de la narration mesuree.')
+        old=w.setdefault('shot_overrides',{}).get(shot_id,{})
+        w['shot_overrides'][shot_id]={
+            'camera_movement':movement,'media_type':media_type,
+            **({'motion_prompt':old['motion_prompt']} if old.get('motion_prompt') else {})}
+        return {'ok':True}
+
+def measured_shots(folder,w):
+    from .cinematic import preview_shots
+    audio=folder/'audio.json'
+    if not audio.exists() or not w.get('chosen',{}).get('storyboard'):
+        return []
+    script=proposal(w,'storyboard',w['chosen']['storyboard'])['data']['script']
+    return preview_shots(script,read(audio),read(folder/'config.json')['production'])
+
+def schedule_video(folder,rid,shot_id,prompt):
+    import re
+    if not isinstance(prompt,str) or not prompt.strip() or len(prompt)>1000:
+        raise ValueError('Prompt de mouvement requis (1000 caracteres maximum).')
+    with transaction(folder) as w:
+        require_active(w,'images')
+        if not re.fullmatch(r's[0-9]{2}-p[0-9]{2}',shot_id) or shot_id not in {x['shot_id'] for x in measured_shots(folder,w)}:
+            raise ValueError('La voix doit etre terminee et le plan doit exister.')
+        config=read(folder/'config.json')['production'].get('video_generation',{})
+        if not config.get('enabled',False):
+            raise ValueError('Activer la generation video locale dans la configuration.')
+        scene=int(shot_id[1:3]);image_id=w['image_choices'].get(str(scene))
+        if not image_id:raise ValueError('Choisir une image avant de generer le clip.')
+        check_image(folder,proposal(w,'images',image_id)['data'])
+        job=add_job(w,'images',kind='video',target=scene,manual=True,
+                    prompt=prompt,base={'shot_id':shot_id,'image_id':image_id})
+        wake(rid)
+        return job['id']
+
+def select_video(folder,rid,shot_id,job_id):
+    with transaction(folder) as w:
+        require_active(w,'images')
+        job=next((j for j in w['jobs'] if j['id']==job_id and j['kind']=='video'
+                  and j['status']=='done' and j['base']['shot_id']==shot_id),None)
+        if not job:raise ValueError('Clip non disponible.')
+        if w['image_choices'].get(str(job['target']))!=job['base']['image_id']:
+            raise ValueError('Ce clip utilise une ancienne image.')
+        if w['image_choices'].get(str(job['target']))!=job['base']['image_id']:
+            raise ValueError('Ce clip utilise une ancienne image.')
+        result=read(folder/'live_results'/f'{job_id}.json')
+        check_video(folder,result)
+        w.setdefault('video_choices',{})[shot_id]=job_id
+        existing=w.setdefault('shot_overrides',{}).get(shot_id,{})
+        w['shot_overrides'][shot_id]={**existing,'media_type':'generated_video'}
+
+def check_video(folder,result):
+    path=Path(result['path']).resolve()
+    if not path.is_relative_to((folder/'generated_clips').resolve()) or not path.is_file() or digest(path)!=result['sha256']:
+        raise ValueError('Clip absent ou modifie.')
+
+def available_videos(folder,w):
+    result={}
+    for job in w['jobs']:
+        if job['kind']!='video' or job['status']!='done':continue
+        path=folder/'live_results'/f"{job['id']}.json"
+        if not path.exists():continue
+        data=read(path)
+        try:check_video(folder,data)
+        except ValueError:continue
+        result[job['id']]={'shot_id':job['base']['shot_id'],
+                           'image_id':job['base']['image_id'],
+                           'job_id':job['id']}
+    return result
+
 def check_image(folder,data):
     p=Path(data['path']).resolve()
     if not p.is_relative_to(folder.resolve()) or not p.is_file() or digest(p)!=data['sha256']:raise ValueError('Image absente ou modifiee : generer un nouvel essai pour ce plan.')
@@ -141,6 +240,15 @@ def validate_images(folder,rid):
             p=proposal(w,'images',pid)
             if p['target']!=s['id']:raise ValueError('Image du mauvais plan.')
             check_image(folder,p['data'])
+        if any(j['kind']=='video' and j['status'] in ('queued','running') for j in w['jobs']):
+            raise ValueError('Terminer ou annuler les generations video avant de valider les images.')
+        for shot_id,job_id in w.get('video_choices',{}).items():
+            job=next((j for j in w['jobs'] if j['id']==job_id),None)
+            if not job or job['base']['image_id']!=w['image_choices'].get(str(job['target'])):
+                raise ValueError('Un clip selectionne est associe a une ancienne image.')
+            check_video(folder,read(folder/'live_results'/f'{job_id}.json'))
+        for j in w['jobs']:
+            if j['kind']=='video' and j['status']=='queued':j['status']='cancelled'
         cancel_background(w,'images');w['stage']='short';add_job(w,'short',kind='render');wake(rid)
 
 def recover(folder):
@@ -175,6 +283,13 @@ def recover(folder):
                     if j['kind']=='render':
                         (folder/'live_results'/f"{j['id']}.json").unlink(missing_ok=True)
                         if w['stage']=='short':j['status']='queued'
+        for shot_id,jid in list(w.get('video_choices',{}).items()):
+            try:check_video(folder,read(folder/'live_results'/f'{jid}.json'))
+            except (ValueError,OSError,KeyError):
+                w['video_choices'].pop(shot_id,None)
+                if w['stage']=='short':
+                    w['stage']='images';w.pop('finished',None)
+                    (folder/'render.json').unlink(missing_ok=True)
         for j in w['jobs']:
             if j['status']=='running':j['status']='queued'
 
@@ -182,7 +297,7 @@ def retry(folder,rid,jid):
     with transaction(folder) as w:
         job=next((j for j in w['jobs'] if j['id']==jid),None)
         if not job or job['status']!='failed':raise ValueError('Seul un calcul en erreur peut etre repris.')
-        if job['kind']=='proposal':require_active(w,job['stage'])
+        if job['kind'] in ('proposal','video'):require_active(w,job['stage'])
         job['status']='queued';job.pop('error',None);job['manual']=True;wake(rid)
 
 def claim(folder,rid):
@@ -191,6 +306,7 @@ def claim(folder,rid):
         jobs=[j for j in w['jobs'] if j['status']=='queued']
         # A renderer cannot race voice production. An audio failure is explicitly retryable.
         jobs=[j for j in jobs if j['kind']!='render' or (folder/'audio.json').exists()]
+        jobs=[j for j in jobs if j['kind']!='video' or (folder/'audio.json').exists()]
         jobs=[j for j in jobs if not (j['kind']=='proposal' and j['stage']=='script') or (folder/'research.json').exists()]
         if not jobs:
             update(rid,status='AWAITING_APPROVAL',step=w['stage'])

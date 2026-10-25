@@ -39,3 +39,12 @@ story_pipeline = 3
 shot_seconds = 3.3
 
 language = "en"
+
+# Optional local I2V. Disabled until a compatible ComfyUI API workflow is exported.
+[production.video_generation]
+enabled = false
+url = "http://127.0.0.1:8188"
+workflow_path = ""
+max_clips = 3
+max_attempts = 2
+timeout_seconds = 600

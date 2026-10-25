@@ -24,18 +24,50 @@ def generate(ctx,llm,job,w):
         return ctx.stage('research',lambda:research(ctx,llm,{'candidates':[job['base']['candidate']],'guided':True}))
     if kind=='audio':
         return ctx.stage('audio',lambda:audio_assets(ctx,llm,job['base']['narrative']))
+    if kind=='video':
+        from pathlib import Path
+        from .video_provider import provider_from_config, VideoGenerationError
+        from .render import probe
+        from .core import digest
+        from .live import check_image
+        image_id=job['base']['image_id']
+        image=proposal(w,'images',image_id)['data']
+        check_image(ctx.path,image)
+        provider=provider_from_config(ctx.cfg['production'])
+        if not provider.available() or not provider.capabilities()['image_to_video']:
+            raise ReviewNeeded('ComfyUI local indisponible ou workflow API absent.')
+        llm.unload()
+        output=ctx.path/'generated_clips'/f"{job['id']}.mp4"
+        if not output.exists():
+            provider.generate(image['path'],output,
+                timeout=int(ctx.cfg['production'].get('video_generation',{}).get('timeout_seconds',600)),
+                cancellation=ctx.check)
+        info=probe(output)
+        if not any(stream.get('codec_type')=='video' for stream in info.get('streams',[])):
+            raise VideoGenerationError('Le media produit ne contient pas de flux video.')
+        return {'path':str(output),'sha256':digest(output),'shot_id':job['base']['shot_id'],
+                'image_id':image_id,'duration':float(info['format']['duration'])}
     if kind=='render':
         from .pipeline import render,final,report
         from .live import check_image
         editorial=proposal(w,'storyboard',w['chosen']['storyboard'])['data']
         images=[]
+        from .live import check_video
+        overrides=deepcopy(w.get('shot_overrides',{}))
+        for shot_id,jid in w.get('video_choices',{}).items():
+            result=read(ctx.path/'live_results'/f'{jid}.json')
+            check_video(ctx.path,result)
+            override=overrides.setdefault(shot_id,{})
+            override['media_type']='generated_video'
+            override['video_path']=result['path']
         for scene in editorial['script']['scenes']:
             item=proposal(w,'images',w['image_choices'][str(scene['id'])])['data']
             check_image(ctx.path,item);images.append({**item,'selection_reason':'human_choice'})
         threshold=score_100(ctx.cfg['production']['min_visual_score'])
         state={'research':read(ctx.path/'research.json'),'editorial':editorial,'audio':read(ctx.path/'audio.json'),
                'images':{'scenes':images,'threshold_100':threshold,'scoring':'mean_quality_relevance_100',
-                         'with_reservations':any(i['score_100']<threshold for i in images)}}
+                         'with_reservations':any(i['score_100']<threshold for i in images),
+                         'shot_overrides':overrides}}
         state['render']=ctx.stage('render',lambda:render(ctx,editorial['script'],state['audio'],state['images']))
         state['final']=ctx.stage('final',lambda:final(ctx,llm,state));report(ctx,state)
         return state['render']
