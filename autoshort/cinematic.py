@@ -63,16 +63,19 @@ MOVEMENTS = ("push_in", "pan_left", "pull_out", "pan_right",
              "tilt_up", "diagonal", "reveal", "tilt_down")
 
 
-def preview_shots(script, seconds_per_shot=3.3):
-    """Guided UI preview before TTS completes; IDs are stable."""
-    result = []
-    for scene in script["scenes"]:
-        estimated = max(1.0, len(scene["narration"].split()) / 2.7)
-        count = max(1, min(3, math.ceil(estimated / max(1.0, seconds_per_shot))))
-        result.extend({"shot_id": f"s{scene['id']:02d}-p{i:02d}",
-                       "scene_id": scene["id"], "camera_movement": MOVEMENTS[(scene["id"] + i - 2) % len(MOVEMENTS)],
-                       "media_type": "animated_image"} for i in range(1, count + 1))
-    return result
+def preview_shots(script, audio=None, production=None):
+    """Only advertise shots known to exist from measured TTS duration.
+
+    Without audio, return no planned shots; guessing the count from word length
+    would offer edits to non-existing IDs.
+    """
+    if audio is None:
+        return []
+    plan = build_plan(script, audio, production or {"fps":25})
+    return [{"shot_id": shot.shot_id, "scene_id": shot.scene_id,
+             "frames": shot.frames, "duration_seconds": shot.duration_seconds,
+             "camera_movement": shot.camera_movement,
+             "media_type": shot.media_type.value} for shot in plan.shots]
 
 
 def build_plan(script, audio, production, overrides=None):
@@ -106,6 +109,7 @@ def build_plan(script, audio, production, overrides=None):
                         media_type=media, camera_movement=movement,
                         visual_prompt=scene.get("image_prompt", ""),
                         motion_prompt=override.get("motion_prompt", "subtle, natural cinematic motion, preserve objects and identity"),
+                        video_path=override.get("video_path"),
                         importance=95 if si == 0 and i == 1 else (85 if si == len(narration) - 1 else 55),
                         source_refs=list(scene.get("claim_ids", [])),
                         continuity_refs=[script.get("visual_bible", "")] if script.get("visual_bible") else [])
