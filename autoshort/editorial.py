@@ -124,10 +124,10 @@ def diagnostics(ctx,prefix,attempt,script,errors,review=None):
     elif review:message+=f" — juge {review['score']}/10, accepte={review['accepted']}"
     ctx.event('editorial',message)
 
-def write_script(ctx,llm,research):
+def write_script(ctx,llm,research,narrative_only=False):
     if ctx.cfg['production'].get('story_pipeline',1)>=2:
         from .storytelling import write_story
-        return write_story(ctx,llm,research)
+        return write_story(ctx,llm,research,narrative_only=narrative_only)
     dossier=research['dossier']
     draft=previous_draft(ctx,dossier)
     prefix='editorial/session_'+uuid4().hex[:10]
@@ -233,6 +233,16 @@ Le storyboard sera produit ensuite.""",{'script':draft,'research':research},Scri
     if not review.get('accepted',False):
         ctx.artifact('editorial/reservations.json',{'policy':'continue_after_revisions','review':review})
     ctx.artifact('editorial/accepted_narration.json',{'research_hash':fingerprint(research),'narrative':accepted,'review':review})
+    payload={'narrative':accepted,'review':review,'prefix':prefix}
+    if narrative_only:return payload
+    return build_storyboard(ctx,llm,research,payload)
+
+def build_storyboard(ctx,llm,research,payload):
+    if 'choice' in payload:
+        from .storytelling import story_board
+        return story_board(ctx,llm,research,payload)
+    accepted=payload['narrative'];review=payload['review'];prefix=payload['prefix']
+    dossier=research['dossier']
     # Une demande courte par scene : aucun tableau, id ou narration a regenerer par le modele.
     key=fingerprint(accepted)
     plans=[]

@@ -7,7 +7,8 @@ from filelock import FileLock
 from .core import Context,DATA,ROOT,ReviewNeeded,Cancelled,update,read,dump,digest
 from .llm import LLM
 from .research import discover,research
-from .editorial import write_script
+from .editorial import write_script,build_storyboard
+from . import guided
 from .assets import audio_assets,image_assets
 from .render import render,final_check,command
 from .schemas import Verdict
@@ -24,6 +25,9 @@ class State(TypedDict,total=False):
 STAGES=['discover','research','editorial','audio','images','render','final']
 
 def verify_cached(ctx):
+    approved_images=guided.workflow(ctx.path)['approvals'].get('images',{}).get('value',{}).get('scenes',[])
+    if any(not Path(a['path']).is_file() or digest(a['path'])!=a['sha256'] for a in approved_images):
+        invalidate(ctx.path,'images')
     # Le contenu valide est immutable. Un fichier manquant ou altere invalide ses descendants.
     for stage in ('audio','images','render'):
         p=ctx.path/f'{stage}.json'
@@ -34,7 +38,15 @@ def verify_cached(ctx):
             ctx.event(stage,'Cache invalide: regeneration des dependances')
 
 def invalidate(folder,stage):
-    for name in STAGES[STAGES.index(stage):]:(folder/f'{name}.json').unlink(missing_ok=True)
+    order=['discover','ideas','research','narrative','editorial','audio','images','render','final']
+    for name in order[order.index(stage):]:(folder/f'{name}.json').unlink(missing_ok=True)
+    w=guided.workflow(folder)
+    affected={'discover':['idea','script','storyboard','images'],'ideas':['idea','script','storyboard','images'],
+              'research':['script','storyboard','images'],'narrative':['script','storyboard','images'],
+              'editorial':['storyboard','images'],'audio':['images'],'images':['images']}.get(stage,[])
+    for name in affected:w['approvals'].pop(name,None)
+    if w.get('pending',{}).get('stage') in affected:w.pop('pending',None)
+    dump(folder/'workflow.json',w)
     (folder/'export'/'quality_report.html').unlink(missing_ok=True)
     (folder/'export'/'manifest.json').unlink(missing_ok=True)
 
@@ -95,19 +107,23 @@ def execute(rid):
         update(rid,status='RUNNING',error='')
         try:
             verify_cached(ctx)
-            graph=StateGraph(State)
-            graph.add_node('step_discover',lambda s:{'candidates':ctx.stage('discover',lambda:discover(ctx,llm))})
-            graph.add_node('step_research',lambda s:{'research':ctx.stage('research',lambda:research(ctx,llm,s['candidates']))})
-            graph.add_node('step_editorial',lambda s:{'editorial':ctx.stage('editorial',lambda:write_script(ctx,llm,s['research']))})
-            graph.add_node('step_audio',lambda s:{'audio':ctx.stage('audio',lambda:audio_assets(ctx,llm,s['editorial']['script']))})
-            graph.add_node('step_images',lambda s:{'images':ctx.stage('images',lambda:image_assets(ctx,llm,s['editorial']['script']))})
-            graph.add_node('step_render',lambda s:{'render':ctx.stage('render',lambda:render(ctx,s['editorial']['script'],s['audio'],s['images']))})
-            graph.add_node('step_final',lambda s:{'final':ctx.stage('final',lambda:final(ctx,llm,s))})
-            graph.add_edge(START,'step_'+STAGES[0])
-            for a,b in zip(STAGES,STAGES[1:]):graph.add_edge('step_'+a,'step_'+b)
-            graph.add_edge('step_'+STAGES[-1],END)
-            state=graph.compile().invoke({},config={'recursion_limit':30})
+            if guided.is_auto(ctx.path):
+                graph=StateGraph(State)
+                graph.add_node('step_discover',lambda s:{'candidates':ctx.stage('discover',lambda:discover(ctx,llm))})
+                graph.add_node('step_research',lambda s:{'research':ctx.stage('research',lambda:research(ctx,llm,s['candidates']))})
+                graph.add_node('step_editorial',lambda s:{'editorial':ctx.stage('editorial',lambda:write_script(ctx,llm,s['research']))})
+                graph.add_node('step_audio',lambda s:{'audio':ctx.stage('audio',lambda:audio_assets(ctx,llm,s['editorial']['script']))})
+                graph.add_node('step_images',lambda s:{'images':ctx.stage('images',lambda:image_assets(ctx,llm,s['editorial']['script']))})
+                graph.add_node('step_render',lambda s:{'render':ctx.stage('render',lambda:render(ctx,s['editorial']['script'],s['audio'],s['images']))})
+                graph.add_node('step_final',lambda s:{'final':ctx.stage('final',lambda:final(ctx,llm,s))})
+                graph.add_edge(START,'step_'+STAGES[0])
+                for a,b in zip(STAGES,STAGES[1:]):graph.add_edge('step_'+a,'step_'+b)
+                graph.add_edge('step_'+STAGES[-1],END)
+                state=graph.compile().invoke({},config={'recursion_limit':30})
+            else:
+                state=execute_guided(ctx,llm)
             ctx.finish_time();report(ctx,state);update(rid,status='READY',step='done')
+        except guided.AwaitingApproval:update(rid,status='AWAITING_APPROVAL',error='')
         except Cancelled as exc:update(rid,status='CANCELLED',error=str(exc))
         except ReviewNeeded as exc:update(rid,status='NEEDS_REVIEW',error=str(exc))
         except Exception as exc:
@@ -117,3 +133,20 @@ def execute(rid):
             ctx.finish_time()
             try:llm.unload()
             except Exception:pass
+
+
+def execute_guided(ctx,llm):
+    state={}
+    state['candidates']=ctx.stage('discover',lambda:discover(ctx,llm))
+    ideas=ctx.stage('ideas',lambda:guided.rank_ideas(ctx,llm,state['candidates']))
+    state['research']=guided.choose_research(ctx,llm,ideas,research)
+    narrative=ctx.stage('narrative',lambda:write_script(ctx,llm,state['research'],narrative_only=True))
+    narrative=guided.gate(ctx,'script',narrative)
+    board=ctx.stage('editorial',lambda:build_storyboard(ctx,llm,state['research'],narrative))
+    state['editorial']=guided.gate(ctx,'storyboard',board)
+    state['audio']=ctx.stage('audio',lambda:audio_assets(ctx,llm,state['editorial']['script']))
+    images=ctx.stage('images',lambda:image_assets(ctx,llm,state['editorial']['script']))
+    state['images']=guided.gate(ctx,'images',guided.image_options(ctx,images,state['editorial']['script']))
+    state['render']=ctx.stage('render',lambda:render(ctx,state['editorial']['script'],state['audio'],state['images']))
+    state['final']=ctx.stage('final',lambda:final(ctx,llm,state))
+    return state

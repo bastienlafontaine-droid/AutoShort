@@ -32,7 +32,7 @@ def cached(ctx,path,schema,make):
     if target.exists():return schema.model_validate_json(target.read_text(encoding='utf-8')).model_dump()
     value=make();ctx.artifact(path,value);return value
 
-def write_story(ctx,llm,research):
+def write_story(ctx,llm,research,narrative_only=False):
     dossier=research['dossier'];identity=research.get('event_scope',{})
     v3=ctx.cfg['production'].get('story_pipeline',2)>=3
     language=ctx.cfg['production'].get('language','fr')
@@ -75,6 +75,15 @@ Utilise uniquement les claim_ids du dossier; pas de citations orales obligatoire
         if not errors(revised,dossier):draft=revised
         else:ctx.event('editorial','Revision structurellement invalide: conservation de la proposition retenue')
     ctx.artifact(f'{prefix}/selected.json',draft)
+    payload={'narrative':draft,'choice':choice,'prefix':prefix}
+    if narrative_only:return payload
+    return story_board(ctx,llm,research,payload)
+
+def story_board(ctx,llm,research,payload):
+    draft=payload['narrative'];choice=payload['choice']
+    prefix=payload['prefix']+('/'+fingerprint(draft)[:16] if payload.get('human_edited') else '')
+    identity=research.get('event_scope',{})
+    v3=ctx.cfg['production'].get('story_pipeline',2)>=3
     direction=cached(ctx,f'{prefix}/direction.json',Direction,lambda:llm.ask('art_director',
         """Definis EN ANGLAIS une direction visuelle pour CE recit uniquement. L'epoque de l'action
 est distincte de l'age de l'objet: une visite de musee en 2019 implique des vetements modernes,

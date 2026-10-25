@@ -43,12 +43,12 @@ def db():
         conn.commit()
     finally: conn.close()
 
-def new_run(theme):
+def new_run(theme, auto=True):
     rid = uuid.uuid4().hex[:16]
     p = DATA / "runs" / rid
     p.mkdir(parents=True)
     dump(p / "config.json", config())
-    dump(p / "request.json", {"theme": theme, "created": time.time(), "version": "0.1.0"})
+    dump(p / "request.json", {"theme": theme, "created": time.time(), "version": "0.1.0", "auto": auto})
     with db() as conn:
         conn.execute("INSERT INTO runs(id,theme,status,step,created,updated) VALUES(?,?,?,?,?,?)",
                      (rid, theme, "QUEUED", "queued", time.time(), time.time()))

@@ -8,6 +8,7 @@ from pydantic import BaseModel,Field
 from filelock import FileLock,Timeout
 from .core import ROOT,DATA,new_run,runs,run_info,update,read
 from .doctor import diagnose
+from . import guided
 
 TOKEN=secrets.token_urlsafe(32)
 ALLOWED_ORIGINS={'http://127.0.0.1:8765','http://localhost:8765'}
@@ -73,11 +74,13 @@ def session():return {'token':TOKEN}
 def health():return diagnose()
 @app.get('/api/runs')
 def list_runs():return runs()
-class Create(BaseModel):theme:str=Field(min_length=5,max_length=300)
+class Create(BaseModel):
+    theme:str=Field(min_length=5,max_length=300)
+    auto:bool=False
 @app.post('/api/runs')
 def create(body:Create):
     if len([r for r in runs() if r['status'] in ('QUEUED','RUNNING')])>=10:raise HTTPException(409,'File pleine (10 productions)')
-    return {'id':new_run(body.theme)}
+    return {'id':new_run(body.theme,auto=body.auto)}
 class Settings(BaseModel):brave_key:str=Field(min_length=10,max_length=300)
 @app.post('/api/settings')
 def settings(body:Settings):
@@ -96,17 +99,20 @@ def details(rid:str):
     info=existing(rid);p=DATA/'runs'/rid/'events.jsonl'
     info['events']=[json.loads(l) for l in p.read_text(encoding='utf-8').splitlines()[-80:]] if p.exists() else []
     info['files']=[x.name for x in (DATA/'runs'/rid/'export').glob('*') if x.is_file() and x.suffix in ('.mp4','.jpg','.html','.json','.srt','.md','.txt') and not x.name.startswith(('scene_','assembled','sample_'))]
+    info['progress']=guided.progress(info,DATA/'runs'/rid)
     return info
 @app.post('/api/runs/{rid}/cancel')
 def cancel(rid:str):
-    r=existing(rid)
-    if r['status']=='QUEUED':update(rid,status='CANCELLED',cancel=1)
-    elif r['status']=='RUNNING':update(rid,cancel=1)
+    existing(rid)
+    with FileLock(str(DATA/'runs'/rid/'approval.lock'),timeout=5):
+        r=existing(rid)
+        if r['status'] in ('QUEUED','AWAITING_APPROVAL'):update(rid,status='CANCELLED',cancel=1)
+        elif r['status']=='RUNNING':update(rid,cancel=1)
     return {'ok':True}
 @app.post('/api/runs/{rid}/resume')
 def resume(rid:str):
     r=existing(rid)
-    if r['status'] in ('RUNNING','QUEUED','READY'):raise HTTPException(409,'Etat incompatible')
+    if r['status'] in ('RUNNING','QUEUED','READY','AWAITING_APPROVAL'):raise HTTPException(409,'Etat incompatible')
     update(rid,status='QUEUED',error='',cancel=0)
     return {'ok':True}
 @app.get('/api/runs/{rid}/files/{name}')
@@ -125,3 +131,31 @@ def logs(rid:str):
         p=folder/name
         if p.exists():chunks.append(name+'\n'+p.read_text(encoding='utf-8',errors='replace')[-12000:])
     return PlainTextResponse('\n\n'.join(chunks))
+
+
+class Approval(BaseModel):
+    stage:str
+    input_hash:str
+    changes:dict=Field(default_factory=dict)
+
+@app.post('/api/runs/{rid}/approve')
+def approve(rid:str,body:Approval):
+    existing(rid)
+    folder=DATA/'runs'/rid
+    with FileLock(str(folder/'approval.lock'),timeout=5):
+        if existing(rid)['status']!='AWAITING_APPROVAL':raise HTTPException(409,'La production n’attend pas de validation.')
+        try:guided.approve(folder,body.stage,body.input_hash,body.changes)
+        except (ValueError,KeyError,TypeError) as exc:raise HTTPException(422,str(exc))
+        update(rid,status='QUEUED',error='',cancel=0)
+    return {'ok':True}
+
+@app.get('/api/runs/{rid}/images/{scene}/{attempt}')
+def preview_image(rid:str,scene:int,attempt:int):
+    existing(rid);folder=DATA/'runs'/rid
+    p=folder/'images/selection.json'
+    if not p.exists():raise HTTPException(404)
+    candidate=next((c for c in read(p).get('candidates',[]) if c['scene']==scene and c['attempt']==attempt),None)
+    if candidate is None:raise HTTPException(404)
+    path=Path(candidate['path']).resolve()
+    if not path.is_relative_to((folder/'images').resolve()) or not path.is_file():raise HTTPException(404)
+    return FileResponse(path,media_type='image/png')

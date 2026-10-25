@@ -233,3 +233,55 @@ exploitable restent des erreurs, pas des notes de qualité.
 
 Après mise à jour du code : relancer AutoShort puis cliquer **Reprendre** sur une
 production arrêtée à l'étape images. Les étapes déjà validées sont conservées.
+
+
+## Mode guide (interface)
+
+La case **Auto**, a cote de **Creer une video**, est decochee par defaut.
+Le parcours guide comporte cinq etapes :
+
+1. Choisir parmi les trois idees classees (titre, angle, note indicative sur 100).
+   La recherche approfondie commence seulement apres le choix. Si les preuves ne
+   tiennent pas, les autres idees sont reproposees avec le motif du rejet.
+2. Relire et modifier le titre, la description et la narration de chaque scene,
+   puis **Valider le script**. Les modifications humaines ne sont pas une nouvelle
+   certification factuelle ; conserver les faits du dossier.
+3. Corriger si besoin les descriptions et prompts des plans, puis **Valider les plans**.
+4. La voix et toutes les images sont produites sans autre interruption.
+   Choisir les images parmi les essais existants de chaque plan, puis
+   **Valider les images et monter le Short**.
+5. Le montage et ses controles s'executent ; lecteur, fichiers et rapport apparaissent.
+
+**Auto coche** conserve l'enchainement automatique. Les anciennes productions
+(sans champ `auto`) et la commande CLI `run` restent automatiques.
+La publication reste exclusivement manuelle.
+
+Les validations sont enregistrees dans `workflow.json`, separement des resultats
+produits. Une pause libere le worker et le verrou GPU, sans consommer le budget
+pendant l'attente. Arreter puis reprendre, ou redemarrer l'application, conserve
+les validations. **Reprendre** ne valide jamais une etape a votre place.
+Les fichiers media manquants/modifies invalident leurs dependances et redemandent
+la validation des images si necessaire. Les brouillons saisis dans l'interface
+sont conserves pendant son actualisation periodique, mais ne sont enregistres
+sur disque qu'en cliquant sur Valider.
+
+### Tests du mode guide
+
+`python -m pytest tests -q` teste le parcours avec services IA/media simules,
+les modifications, le choix d'image, les erreurs/reprises, les refus de sujets,
+les validations perimees et le mode automatique.
+
+Test navigateur optionnel (Playwright et Chromium installes separement) :
+
+```shell
+python tests/ui_fixture_server.py
+# Dans un autre terminal :
+node tests/browser_guided.cjs
+```
+
+Le serveur de test utilise un dossier temporaire, simule l'IA et genere un petit
+MP4 avec FFmpeg. Fermer l'application normale avant de le lancer sur le port 8765.
+Ce scenario ne mesure ni la qualite de generation ni la compatibilite GPU Windows.
+Lors de cette modification, les tests Python ont ete executes ; le test navigateur
+n'a pas pu etre execute (Chromium indisponible et navigateur distant sans acces au
+serveur local). La validation a la souris sur le poste Windows reste a faire.
