@@ -108,7 +108,16 @@ def choose(folder,rid,stage,pid):
     with transaction(folder) as w:
         require_active(w,stage);p=proposal(w,stage,pid)
         if stage=='images':
-            check_image(folder,p['data']);w['image_choices'][str(p['target'])]=pid;return
+            check_image(folder,p['data'])
+            old=w['image_choices'].get(str(p['target']))
+            if old!=pid:
+                for shot_id in list(w.get('video_choices',{})):
+                    if int(shot_id[1:3])==p['target']:
+                        w['video_choices'].pop(shot_id,None)
+                for shot_id,setting in w.get('shot_overrides',{}).items():
+                    if int(shot_id[1:3])==p['target'] and setting.get('media_type')=='generated_video':
+                        setting['media_type']='animated_image'
+            w['image_choices'][str(p['target'])]=pid;return
         if stage=='ideas' and pid in w['rejected']:raise ValueError('Ce sujet a ete rejete; choisir une autre idee.')
         cancel_background(w,stage);w['chosen'][stage]=pid;w['message']=''
         if stage=='ideas':
