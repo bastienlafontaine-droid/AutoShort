@@ -6,6 +6,7 @@ from __future__ import annotations
 import json, time
 from pathlib import Path
 from urllib.parse import urlparse
+from .core import Cancelled
 import httpx
 
 
@@ -69,6 +70,19 @@ class ComfyUIVideoProvider:
             reply.raise_for_status()
             pid = reply.json()["prompt_id"]
         start = time.monotonic()
+        try:
+            return self._await_output(pid, output, timeout, cancellation, start)
+        except Cancelled:
+            # Interrupt only our own pending queued task. Never issue /interrupt,
+            # which might abort someone else's active ComfyUI generation.
+            try:
+                with httpx.Client(timeout=5, trust_env=False) as client:
+                    client.post(self.url + "/queue", json={"delete":[pid]})
+            except httpx.HTTPError:
+                pass
+            raise
+
+    def _await_output(self, pid, output, timeout, cancellation, start):
         while time.monotonic() - start < timeout:
             if cancellation:
                 cancellation()
@@ -77,16 +91,20 @@ class ComfyUIVideoProvider:
                 result.raise_for_status()
                 history = result.json().get(pid)
             if history:
+                status=history.get("status",{})
+                if status.get("status_str")=="error":
+                    details=status.get("messages",[])
+                    raise VideoGenerationError("ComfyUI execution error: "+str(details)[-700:])
                 for node in history.get("outputs", {}).values():
                     for media in node.get("gifs", []) + node.get("videos", []):
                         name = media.get("filename")
-                        if not name: continue
+                        if not name or Path(name).name != name: continue
                         with httpx.Client(timeout=60, trust_env=False) as client:
                             response = client.get(self.url + "/view", params={"filename": name, "subfolder": media.get("subfolder", ""), "type": media.get("type", "output")})
                             response.raise_for_status()
                         destination = Path(output)
                         destination.parent.mkdir(parents=True, exist_ok=True)
-                        tmp = destination.with_suffix(".pending")
+                        tmp = destination.with_suffix(".pending.mp4")
                         tmp.write_bytes(response.content)
                         try:
                             from .render import probe
