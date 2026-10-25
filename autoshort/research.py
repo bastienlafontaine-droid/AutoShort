@@ -117,10 +117,13 @@ def discover(ctx,llm):
     for run in runs():
         p=DATA/"runs"/run["id"]/"research.json"
         if p.exists(): prior.append(read(p)["dossier"]["title"])
-    result=llm.ask("discover","Propose "+str(ctx.cfg['production']['candidates'])+" sujets reels precis et differents a partir des pistes. Si le theme nomme deja un evenement precis, reste sur cet evenement et propose moins de candidats plutot que des histoires similaires. Les extraits ne sont pas des preuves. Privilegie sujets racontables en 75 secondes, sans gore, sans accusations sur personnes vivantes. Evite les sujets deja traites. query doit permettre de trouver une source fiable.",
+    guided_mode=not read(ctx.path/'request.json').get('auto',True)
+    instruction=('Propose au moins 3 sujets distincts, pertinents pour la thematique; titre et angle en francais. ' if guided_mode else 'Si le theme nomme deja un evenement precis, reste sur cet evenement et propose moins de candidats plutot que des histoires similaires. ')
+    result=llm.ask("discover",instruction+"Propose "+str(ctx.cfg['production']['candidates'])+" sujets reels precis et differents a partir des pistes. Respecte la thematique precise. Les extraits ne sont pas des preuves. Privilegie sujets racontables en 75 secondes, sans gore, sans accusations sur personnes vivantes. Evite les sujets deja traites. query doit permettre de trouver une source fiable.",
                    {"theme":theme,"results":hits,"already_used":prior},Candidates,temperature=0.6)
     result["candidates"]=[x for x in result["candidates"] if all(SequenceMatcher(None,normalize(x["title"]),normalize(t)).ratio()<0.78 for t in prior)]
     if not result["candidates"]: raise ReviewNeeded("Aucun sujet nouveau trouve")
+    if guided_mode and len(result['candidates'])<3:raise ReviewNeeded('Moins de trois idees nouvelles. Preciser ou elargir la thematique puis relancer.')
     return result
 
 def evidence_errors(dossier,sources):
@@ -140,6 +143,7 @@ def research(ctx,llm,candidates):
     for idx,candidate in enumerate(selected):
         ctx.check()
         key=hashlib.sha256(json.dumps({'candidate':candidate,'contract':'event-v2' if ctx.cfg['production'].get('story_pipeline',1)>=2 else 'passages-v1','model':ctx.cfg['models']['text']},sort_keys=True).encode()).hexdigest()[:16]
+        if candidates.get('guided'):idx=key
         cache=ctx.path/'research'/f'result_{key}.json'
         if cache.exists():
             result=read(cache)
