@@ -1,0 +1,41 @@
+# Toute modification s'applique aux nouvelles productions. Reprise = configuration initiale.
+[models]
+ollama_url = "http://127.0.0.1:11434"
+text = "qwen3:32b"
+vision = "qwen3-vl:8b-instruct"
+context = 16384
+image = "stabilityai/stable-diffusion-xl-base-1.0"
+voice = "af_heart"
+asr = "small"
+
+request_timeout_seconds = 1800
+[production]
+width = 1080
+height = 1920
+fps = 25
+image_width = 768
+image_height = 1344
+image_steps = 30
+min_seconds = 35
+max_seconds = 95
+candidates = 6
+finalists = 3
+script_attempts = 3
+image_attempts = 4
+audio_attempts = 2
+max_search_calls = 40
+max_llm_calls = 120
+max_run_minutes = 360
+min_editorial_score = 7
+min_visual_score = 6
+max_asr_error = 0.23
+progress_bar = false
+style = "clean cinematic editorial illustration, clear subject, restrained colors"
+# Pas de musique par defaut : deposez un fichier dont vous possedez les droits.
+music = ""
+
+story_pipeline = 3
+
+shot_seconds = 3.3
+
+language = "en"

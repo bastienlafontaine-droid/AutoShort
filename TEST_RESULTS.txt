@@ -1,0 +1,15 @@
+AutoShort editorial fix 0.1.1
+Validation de preparation : Linux, Python 3.12, sans modele IA reel.
+28 tests passent, dont les 20 tests initiaux et 8 nouveaux tests :
+- revision avec le brouillon precedent et son deficit de mots;
+- rejet detaille et diagnostics persistants;
+- reprise du meilleur brouillon v0.1 sans ecrasement;
+- storyboard sans reecriture de la narration validee;
+- maintien du seuil minimum de 135 mots;
+- transmission des critiques factuelles au redacteur;
+- application avec sauvegarde du code et conservation des sources/budgets;
+- refus de modifier le code lorsque le serveur est actif.
+
+La commande .cmd Windows et les reponses des modeles locaux ne sont pas executees ici.
+Les tests de revision inclus peuvent etre relances apres application depuis AutoShort :
+.venv\Scripts\python.exe -m pytest correctif-0.1.1\tests -q

@@ -1,0 +1,210 @@
+# AutoShort Local — Windows / RTX 5080 16 Go
+
+Une thématique → recherche de sujets → vérification documentaire → script révisé → voix française → illustrations SDXL contrôlées → montage vertical → rapport qualité.
+
+**La publication reste manuelle.** Aucun compte TikTok ou YouTube n'est requis.
+Cette version est un projet exécutable, pas une garantie de production sans défaut :
+les services IA réels et le GPU doivent être validés sur votre PC.
+
+## Démarrage : trois actions
+
+1. Extraire **tout** le ZIP dans un dossier, par exemple `C:\AutoShort`.
+   Éviter OneDrive et les chemins très longs. Ne pas exécuter depuis l'archive.
+2. Double-cliquer **INSTALLER.cmd**. Accepter si nécessaire les fenêtres Windows
+   des installateurs officiels. L'installation réutilise Ollama s'il est déjà présent.
+3. Dans l'interface qui s'ouvre, saisir une clé [Brave Search API](https://brave.com/search/api/),
+   puis cliquer **Créer une vidéo**. La thématique est préremplie.
+
+Pour les démarrages suivants : **LANCER.cmd**.
+L'interface est disponible à http://127.0.0.1:8765 . Si le navigateur s'ouvre avant
+le démarrage du serveur, actualiser la page quelques secondes plus tard.
+Garder la fenêtre ouverte pendant les productions. Désactiver temporairement
+la mise en veille Windows pendant une longue production.
+
+### Ce qui reste nécessaire
+
+- Windows 11 x64, accès Internet et pilote NVIDIA récent compatible CUDA 12.8.
+- `winget` (App Installer Microsoft Store), généralement déjà installé.
+- Environ **35 à 50 Go libres**, ordre de grandeur incluant environnement, modèles
+  et premiers médias. L'installation ne télécharge pas tous les fichiers SDXL.
+- Une clé Brave Search : cette API peut être payante selon votre offre.
+  Aucun abonnement IA générative cloud n'est nécessaire.
+- Fermer les autres applications qui utilisent fortement le GPU (ComfyUI,
+  jeux, sessions Ollama/Open WebUI). Le verrou AutoShort ne peut pas réserver
+  physiquement le GPU face aux autres applications.
+- Écouter et visionner les premiers résultats avant publication pour calibrer
+  les juges. La qualité factuelle et le naturel de la voix ne sont pas certifiés.
+
+La clé Brave est conservée en clair dans `.env`, uniquement sur votre PC. Ne
+partagez ni ce fichier, ni `data/` sans en examiner le contenu. L'archive fournie
+ne contient aucune clé. Les recherches sortent sur Internet ; les scripts,
+voix et images ne sont pas envoyés à un fournisseur de génération cloud.
+Les téléchargements initiaux des modèles nécessitent également Internet.
+
+## Ce qui est installé automatiquement
+
+| Composant | Installation |
+|---|---|
+| uv et Python 3.11 isolé | winget + uv |
+| Ollama | installation uniquement si absent |
+| FFmpeg et ffprobe | paquet Gyan.FFmpeg si absents |
+| PyTorch pour Blackwell | 2.7.1, CUDA 12.8, build officiel |
+| Modules du projet | environnement `.venv` séparé |
+| Qwen3 8B et Qwen3-VL 8B | `ollama pull` |
+| SDXL base | téléchargement Hugging Face FP16 |
+| Kokoro + voix française | téléchargement automatique, test vocal |
+| Whisper small | téléchargement et retranscription du test vocal |
+
+Le script ne met pas à jour vos pilotes et ne change pas la politique PowerShell
+persistante. `ExecutionPolicy Bypass` s'applique uniquement au processus de lancement.
+Il ne désinstalle pas vos modèles existants et ne modifie pas Open WebUI.
+Les paquets système déjà présents sont conservés. Si Ollama est trop ancien pour
+Qwen3-VL, mettre à jour Ollama puis relancer l'installation.
+
+Les dépendances Windows/Python 3.11 sont figées dans `requirements-windows.lock`,
+résolu lors de la préparation. Les versions réellement installées sont aussi
+enregistrées dans `installation-lock.txt`.
+Les digests des modèles Ollama sont enregistrés par le diagnostic. Les tags Ollama
+et les branches Hugging Face peuvent évoluer : figer ces digests/revisions après
+votre premier benchmark validé. Les versions de code de ce paquet sont `0.1.0`.
+
+## Utilisation quotidienne
+
+1. Lancer `LANCER.cmd`.
+2. Vérifier le diagnostic, puis saisir une thématique précise.
+3. Lancer une ou plusieurs productions ; la file traite **une vidéo à la fois**.
+4. Attendre le statut « Prête à visionner ».
+5. Visionner, écouter, consulter les sources puis télécharger `video.mp4`.
+
+Exemples d'entrées :
+- Histoires vraies insolites, inventions et erreurs historiques.
+- Histoires vraies insolites de transports au XIXe siècle.
+- Histoires étonnantes et documentées de découvertes scientifiques.
+
+Le moteur peut refuser tous les candidats. Cela signifie qu'il n'a pas trouvé
+assez de preuves ou un angle suffisamment clair dans son budget de recherche.
+Modifier la thématique ou lancer une nouvelle production permet une nouvelle recherche.
+Il ne remplace jamais des preuves absentes par une anecdote inventée.
+
+## Livrables
+
+Dans `data/runs/<identifiant>/export/` :
+
+- `video.mp4` : 1080 × 1920, 25 images/seconde, H.264/AAC ; cible 60–95 secondes.
+- `cover.jpg` : capture de couverture, pas une miniature conçue séparément.
+- `subtitles.srt` et `subtitles.ass`.
+- `script.md`, `description.txt`.
+- `sources.json` : textes sources et dossier de faits.
+- `quality_report.html`, `technical_report.json`, `final_visual_review.json`.
+- `manifest.json` : configuration, médias, seeds, évaluations et compteurs.
+- `contact_sheet.jpg`, `timeline.json`.
+
+Une vidéo peut exister en brouillon avant d'être acceptée. Le statut `READY`
+indique que tous les contrôles implémentés ont accepté le résultat, **pas**
+une certification historique ni une promesse de monétisation.
+
+## Architecture livrée
+
+- Orchestration **LangGraph** avec rôles spécialisés et boucles bornées dans les étapes.
+- Checkpoints applicatifs atomiques JSON après chaque étape validée ; file et états
+  en **SQLite WAL**. Pas de serveur PostgreSQL à gérer.
+- Backend **FastAPI**, interface HTML/JavaScript locale sans compilation Node.
+- Images **Diffusers / SDXL** dans un sous-processus qui libère le GPU à sa sortie.
+  Pas de dépendance ComfyUI à configurer.
+- Texte et inspection visuelle via **Ollama**, chargés successivement.
+- Voix Kokoro et ASR Whisper en **CPU** pour simplifier la compatibilité Windows
+  et préserver la VRAM. Plus lents qu'un traitement GPU, mais isolés du générateur d'images.
+- Montage FFmpeg en **CPU libx264** pour une disponibilité reproductible. NVENC
+  n'est pas activé ni requis dans cette version.
+
+Ces adaptations réduisent l'installation tout en conservant la chaîne de production.
+Les poids ne sont pas intégrés au ZIP, seulement téléchargés depuis leurs dépôts.
+
+## Vérifications effectivement implémentées
+
+| Étape | Contrôle | Échec |
+|---|---|---|
+| Découverte | Historique des titres, filtre de similarité | Nouveau candidat |
+| Recherche | Pages lisibles, citations présentes, ≥2 domaines et juge d'indépendance | Candidat suivant |
+| Faits | Juge sur chaque fait et les textes sources | Candidat suivant |
+| Script | Références aux faits, longueur, juge factuel/éditorial | Jusqu'à 3 versions |
+| Audio | Retranscription indépendante, écart de mots, amplitude, silences, durée | Jusqu'à 2 productions par segment |
+| Images | Vrai fichier inspecté par Qwen3-VL | Jusqu'à 3 images par scène |
+| Montage | Décodage, dimensions, pistes, durée, noir et silence | À revoir |
+| Vidéo finale | Planche de captures contrôlée par VLM | À revoir |
+
+Les corrections d'images sont intégrées en tête de prompt. Le style passe aussi
+par le second encodeur SDXL. Les prompts réellement tronqués à la limite des
+encodeurs CLIP sont enregistrés dans les métadonnées de génération.
+
+Les sous-titres reprennent le **texte original**, avec correspondance aux mots
+reconnus et interpolation locale en cas de non-correspondance. Ce n'est pas un
+alignement forcé WhisperX complet : l'installer séparément augmenterait la fragilité
+Windows. Le taux de correspondance est visible dans `timeline.json`.
+
+## Limites explicites de cette version
+
+- Le même modèle texte joue plusieurs rôles : ses erreurs peuvent être corrélées.
+- Deux domaines et un juge ne prouvent pas l'indépendance historique des sources.
+  Les citations sont vérifiées mécaniquement, leur implication est évaluée par IA.
+- La qualité esthétique, la prosodie et les anachronismes ne sont pas parfaitement détectés.
+- Les images d'un même personnage ne garantissent pas la continuité d'identité.
+  Les prompts privilégient donc objets, lieux et compositions simples.
+- Pas de génération vidéo Wan, de lip-sync ni de transitions 3D. Vidéo = illustrations
+  originales avec mouvements légers, narration, sous-titres et barre progressive optionnelle.
+- Pas de musique incluse. Ajouter votre fichier autorisé via `production.music`.
+- Pas de modification autonome du code ou des prompts système. Les corrections portent
+  sur le contenu du run, pas sur les règles de validation.
+- Pas de mesure automatique des vues et pas de publication.
+- L'application est locale, mono-utilisateur. Ne pas l'exposer sur Internet ou le LAN.
+
+## Reprise et budgets
+
+« Reprendre » conserve les étapes valides et les budgets de la production. Les modèles
+ne repassent pas sur un dossier documentaire déjà accepté. Si un média est absent ou
+modifié, son étape et les suivantes sont invalidées.
+
+Limites initiales : 14 recherches API, 75 appels LLM, 180 minutes actives par production.
+Un appel réseau ou une inférence en cours peut finir avant l'annulation ; les
+sous-processus média sont arrêtés rapidement. Un run peut rester en reprise partielle
+après arrêt de l'application. Le temps total est sauvegardé aux sorties normales ;
+un arrêt brutal peut perdre le compteur de temps du segment interrompu, mais pas les
+compteurs d'appels déjà persistés.
+
+Les tentatives d'un lot média non validé sont rejouées lors d'une reprise d'étape.
+Pour refaire volontairement une étape et ses descendants :
+
+```powershell
+.\.venv\Scripts\python.exe -m autoshort.cli retry IDENTIFIANT --from-stage images
+```
+
+Le run ne doit pas être actif. Les budgets restent inchangés. Si le budget est épuisé,
+créer une nouvelle production. `config.toml` s'applique aux nouveaux runs uniquement.
+
+## Commandes utiles
+
+```powershell
+# Installation (alternative au double-clic)
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1
+
+# Installer sans télécharger les modèles immédiatement
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -SkipModels
+
+# Démarrer
+.\LANCER.cmd
+
+# Diagnostic complet (inclut un calcul CUDA réel)
+.\.venv\Scripts\python.exe -m autoshort.cli doctor
+
+# Précharger SDXL, voix et reconnaissance vocale
+.\.venv\Scripts\python.exe -m autoshort.cli prefetch
+
+# Tester le code et FFmpeg, sans génération IA ni recherche payante
+.\.venv\Scripts\python.exe -m pytest -q
+
+# Production sans interface (ne pas la lancer en parallèle de l'interface)
+.\.venv\Scripts\python.exe -m autoshort.cli run --theme "Histoires vraies insolites"
+```
+
+Consulter `docs/DEPANNAGE.md`, `docs/ARCHITECTURE.md`, `docs/VALIDATION.md` et
+`LICENSES.md` avant de modifier les composants.

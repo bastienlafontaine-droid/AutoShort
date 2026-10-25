@@ -1,0 +1,2 @@
+[console_scripts]
+autoshort = autoshort.cli:main

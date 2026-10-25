@@ -1,0 +1,30 @@
+Metadata-Version: 2.4
+Name: autoshort-local
+Version: 0.1.0
+Summary: Production locale de videos documentees, avec controles et reprises
+Requires-Python: <3.13,>=3.11
+License-File: LICENSE
+License-File: LICENSES.md
+Requires-Dist: fastapi<1,>=0.115
+Requires-Dist: uvicorn<1,>=0.34
+Requires-Dist: pydantic<3,>=2.10
+Requires-Dist: langgraph<2,>=0.3
+Requires-Dist: httpx<1,>=0.28
+Requires-Dist: trafilatura<3,>=2
+Requires-Dist: Pillow<12,>=11
+Requires-Dist: numpy<3,>=1.26
+Requires-Dist: soundfile<1,>=0.13
+Requires-Dist: diffusers<1,>=0.33
+Requires-Dist: transformers<5,>=4.51
+Requires-Dist: accelerate<2,>=1.6
+Requires-Dist: safetensors<1,>=0.5
+Requires-Dist: huggingface-hub<1,>=0.30
+Requires-Dist: kokoro<1,>=0.9.4
+Requires-Dist: espeakng-loader==0.2.4
+Requires-Dist: phonemizer-fork<4,>=3.3
+Requires-Dist: faster-whisper<2,>=1.1
+Requires-Dist: filelock<4,>=3.17
+Requires-Dist: num2words<1,>=0.5.14
+Provides-Extra: test
+Requires-Dist: pytest<9,>=8; extra == "test"
+Dynamic: license-file
