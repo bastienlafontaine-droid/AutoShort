@@ -3,6 +3,7 @@ from pathlib import Path
 from .core import ROOT, dump, digest, ReviewNeeded
 from .audio import captions
 from .cinematic import build_plan, camera_filter
+from .video_provider import provider_from_config
 
 def command(ctx,args,cwd=None):
     ctx.check()
@@ -61,6 +62,11 @@ def render(ctx,script,audio,images):
     # Each narrated scene is rendered as multiple visual shots, but its original
     # TTS track is attached once, avoiding audio cuts at shot boundaries.
     shot_timeline=[]
+    video_cfg=cfg.get('video_generation',{})
+    provider=provider_from_config(cfg)
+    video_budget=max(0,int(video_cfg.get('max_clips',3)))
+    video_attempts=max(1,min(2,int(video_cfg.get('max_attempts',2))))
+    generated=0
     by_scene={}
     for shot in plan.shots:
         by_scene.setdefault(shot.scene_id, []).append(shot)
@@ -72,16 +78,40 @@ def render(ctx,script,audio,images):
         shots=by_scene[n]
         scene_offset=0.0
         for shot in shots:
+            if video_cfg.get('enabled',False) and not overrides and generated<video_budget and shot.importance>=85:
+                shot.media_type='generated_video'
             clip=folder/f"{shot.shot_id}.mp4"
             movement=shot.camera_movement
             media_kind='animated_image'
             reason=None
             video=Path(shot.video_path) if shot.video_path else None
+            if shot.media_type.value=='generated_video' and not video:
+                if generated>=video_budget:
+                    reason='Local video budget exhausted'
+                elif not provider.available() or not provider.capabilities()['image_to_video']:
+                    reason='ComfyUI unavailable or exported workflow missing'
+                else:
+                    destination=ctx.path/'generated_clips'/f'{shot.shot_id}.mp4'
+                    if destination.exists():
+                        video=destination
+                    else:
+                        for attempt in range(video_attempts):
+                            try:
+                                ctx.check()
+                                provider.generate(img['path'],destination,
+                                    timeout=int(video_cfg.get('timeout_seconds',600)),cancellation=ctx.check)
+                                video=destination
+                                break
+                            except Exception as exc:
+                                reason=f'ComfyUI attempt {attempt+1}: {type(exc).__name__}: {str(exc)[:130]}'
+                                ctx.event('render',reason)
+                    generated+=1
             if shot.media_type.value=='generated_video':
                 if video and video.is_file():
                     try:
                         check=probe(video)
                         if not any(x.get('codec_type')=='video' for x in check.get('streams',[])):raise ValueError('No video stream')
+                        if float(check.get('format',{}).get('duration',0)) + 0.02 < shot.duration_seconds:raise ValueError('Clip too short')
                         command(ctx,['ffmpeg','-hide_banner','-y','-i',str(video),'-vf',f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps},format=yuv420p",'-an','-t',str(shot.duration_seconds),'-c:v','libx264','-preset','fast','-crf','20',str(clip)])
                         media_kind='generated_video'
                     except Exception as exc:
