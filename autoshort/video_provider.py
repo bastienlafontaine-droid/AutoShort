@@ -7,7 +7,6 @@ import json, time
 from pathlib import Path
 from urllib.parse import urlparse
 import httpx
-from .render import probe
 
 
 class VideoGenerationError(RuntimeError):
@@ -90,6 +89,7 @@ class ComfyUIVideoProvider:
                         tmp = destination.with_suffix(".pending")
                         tmp.write_bytes(response.content)
                         try:
+                            from .render import probe
                             data = probe(tmp)
                             if not any(s.get("codec_type") == "video" for s in data.get("streams", [])):
                                 raise VideoGenerationError("ComfyUI output is not video")
