@@ -68,7 +68,7 @@ def score_100(value):
 def image_assets(ctx,llm,script):
     from PIL import Image
     folder=ctx.path/'images';folder.mkdir(exist_ok=True)
-    approved={}; best={}; corrections={}; models=ctx.cfg['models']
+    approved={}; best={}; candidates=[]; corrections={}; models=ctx.cfg['models']
     threshold=score_100(ctx.cfg['production']['min_visual_score'])
     for attempt in range(ctx.cfg['production']['image_attempts']):
         pending=[s for s in script['scenes'] if s['id'] not in approved]
@@ -108,13 +108,21 @@ def image_assets(ctx,llm,script):
             p=Path(j['output'])
             with Image.open(p) as image:
                 image.verify()
-            report=ctx.path/'images'/f"review_{s['id']}_{attempt}.json"
-            verdict=None
-            if j['output'] in reusable and report.is_file():
+            image_hash=digest(p)
+            rating_key=hashlib.sha256(json.dumps({'scene':s,'bible':script['visual_bible'],
+                'vision':models.get('vision'),'image_hash':image_hash,'policy':2},sort_keys=True).encode()).hexdigest()
+            report=ctx.path/'images'/f"rating_{s['id']}_{attempt}.json"
+            cached_rating=None
+            if report.is_file():
                 try:
                     saved=read(report)
-                    if 'score' in saved and 'correction' in saved:verdict=saved
-                except (OSError,ValueError,TypeError):pass
+                    if saved.get('rating_key')==rating_key:
+                        VisualVerdict.model_validate(saved['quality'])
+                        if saved.get('relevance') is not None:VisualVerdict.model_validate(saved['relevance'])
+                        cached_rating=saved
+                except (OSError,ValueError,KeyError,TypeError):pass
+            verdict=None
+            if cached_rating is not None:verdict=cached_rating['quality']
             if verdict is None:
                 ctx.event('images',f"Scene {s['id']}: evaluation visuelle")
                 verdict=llm.ask('visual_judge',
@@ -122,16 +130,19 @@ def image_assets(ctx,llm,script):
 majeures, mauvais objets/epoque, composition illisible, anatomie grossierement incorrecte.
 Une illustration est autorisee; ne demande pas de photorealisme. score 0..100; accepte seulement >={threshold}
 et sans defaut majeur. correction EN ANGLAIS: prompt de remplacement complet, 45 mots maximum, un seul cadre sans collage.
+Note explicitement sur 100: 0-19 inutilisable, 20-39 defauts majeurs, 40-59 faible, 60-79 utilisable avec reserves, 80-100 solide. Justifie la note par des defauts visibles.
 Tu ne peux pas certifier l'exactitude historique d'une image.''',
               {'scene':s,'visual_bible':script['visual_bible']},VisualVerdict,image=p,temperature=0.1)
-            aesthetic=score_100(verdict.get('aesthetic_100',verdict.get('score',0)))
-            note=aesthetic
+            quality=dict(verdict)
+            aesthetic=quality['score']
+            relevance=None
+            note=float(aesthetic)
             if ctx.cfg['production'].get('story_pipeline',2)>=3:
                 relevance_path=f"images/relevance_{s['id']}_{attempt}.json"
-                # Always re-evaluate relevance, including reused images; never trust an old aesthetic pass.
-                relevance=llm.ask('visual_judge',
+                relevance=cached_rating['relevance'] if cached_rating is not None else None
+                if relevance is None:relevance=llm.ask('visual_judge',
                     f"""Judge the attached image against THIS scene's narration and intended visible action.
-First describe what is actually visible in issues, at most 35 words. Score 0..100.
+Score 0..100: 0-19 unrelated, 20-39 major mismatch, 40-59 weak match, 60-79 usable representation, 80-100 clear match. Explain concrete mismatches in issues, at most 35 words. Empty issues if none.
 A frame needs to illustrate ONE main idea, not every narrated clause.
 A representative local scene is valid for global consequences; one scientist can represent science.
 Do not demand every country, the original cause, or the original setting in each frame.
@@ -143,24 +154,38 @@ correction: a complete replacement English image prompt, maximum 45 words, ONE s
 Do not repeat the failed composition. Never invent specific allegations or events.""",
                     {'narration':s['narration'],'intended_image':s['visual'],'prompt':s['image_prompt']},
                     VisualVerdict,image=p,temperature=0.1)
-                relevance['score']=score_100(relevance.get('score_100',relevance['score']))
-                relevance['score_100']=relevance['score']
-                relevance['accepted']=relevance['score']>=threshold
                 ctx.artifact(relevance_path,relevance)
-                note=(aesthetic+relevance['score'])//2
-                verdict={**verdict,**{k:relevance[k] for k in ('issues','correction') if k in relevance}}
-            verdict['score']=note;verdict['score_100']=note;verdict['aesthetic_100']=aesthetic
-            verdict['accepted']=note>=threshold
+                note=round((aesthetic+relevance['score'])/2,1)
+            verdict={'score':note,'score_100':note,'aesthetic_100':aesthetic,
+                     'relevance_100':relevance['score'] if relevance is not None else None,
+                     'accepted':note>=threshold,
+                     'issues':quality['issues']+(relevance['issues'] if relevance is not None else []),
+                     'correction':(relevance['correction'] if relevance is not None and relevance['score']<=aesthetic
+                                   and relevance['correction'].strip() else quality['correction'])}
+            ctx.artifact(str(report.relative_to(ctx.path)),{'rating_key':rating_key,'quality':quality,'relevance':relevance,'combined':verdict})
             ctx.artifact(f"images/review_{s['id']}_{attempt}.json",verdict)
-            ctx.event('images',f"Scene {s['id']}: note {note}/100, accepte={verdict['accepted']}")
-            candidate={'scene':s['id'],'path':str(p),'sha256':digest(p),'seed':j['seed'],'prompt':j['prompt'],'effective_generation':read(str(p)+'.generation.json'),'review':verdict,'score_100':note}
+            detail=f"qualite {aesthetic}/100"
+            if relevance is not None:detail+=f", pertinence {relevance['score']}/100"
+            ctx.event('images',f"Scene {s['id']}, essai {attempt+1}: {detail}; moyenne {note}/100")
+            candidate={'scene':s['id'],'attempt':attempt+1,'path':str(p),'sha256':image_hash,'seed':j['seed'],
+                       'prompt':j['prompt'],'effective_generation':read(str(p)+'.generation.json'),
+                       'review':verdict,'quality_review':quality,'relevance_review':relevance,'score_100':note}
+            candidates.append(candidate)
             if s['id'] not in best or note>best[s['id']]['score_100']:best[s['id']]=candidate
             if verdict['accepted']:approved[s['id']]=candidate
-            else:corrections[s['id']]=verdict['correction']
+            elif verdict['correction'].strip():corrections[s['id']]=verdict['correction']
     llm.unload()
     for s in script['scenes']:
         if s['id'] in approved:continue
         if s['id'] not in best:raise ReviewNeeded(f"Aucune image exploitable pour la scene {s['id']}.")
         approved[s['id']]=best[s['id']]
         ctx.event('images',f"Scene {s['id']}: meilleur essai retenu {best[s['id']]['score_100']}/100")
-    return {'scenes':[approved[s['id']] for s in script['scenes']]}
+    selected=[]
+    for scene in script['scenes']:
+        candidate=approved[scene['id']]
+        candidate['selection_reason']='threshold_met' if candidate['score_100']>=threshold else 'best_available_after_attempts'
+        selected.append(candidate)
+    result={'scenes':selected,'threshold_100':threshold,'scoring':'mean_quality_relevance_100',
+            'with_reservations':any(c['score_100']<threshold for c in selected)}
+    ctx.artifact('images/selection.json',{**result,'candidates':candidates})
+    return result

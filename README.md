@@ -208,3 +208,28 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -SkipM
 
 Consulter `docs/DEPANNAGE.md`, `docs/ARCHITECTURE.md`, `docs/VALIDATION.md` et
 `LICENSES.md` avant de modifier les composants.
+
+
+## Sélection des images après les essais
+
+Chaque image reçoit deux notes distinctes sur 100 : qualité visuelle et pertinence
+par rapport à la narration. La note finale est leur moyenne (une décimale).
+Le seuil `min_visual_score` conserve la compatibilité avec la configuration sur 10
+(ex. 8 = 80/100). Les notes des juges sont toujours sur 100 : 5 reste 5/100.
+
+Une scène qui atteint le seuil ne consomme plus de nouvelles générations. Après
+`image_attempts`, la meilleure image disponible de chaque scène est retenue même
+sous le seuil ; une égalité conserve le premier essai. Le montage continue avec
+les réserves, sans modifier les verdicts originaux des juges.
+
+Le juge visuel final reste consultatif pour ce mode : son refus est conservé au
+rapport sans empêcher la livraison. Les vérifications techniques du montage restent actives.
+
+Les notes, motifs et essais retenus figurent dans `images/selection.json` et dans
+le rapport HTML final. Les évaluations sont réutilisées seulement pour une image,
+une scène, un style et un modèle de vision identiques. Les anciennes évaluations
+sans cette identité sont recalculées. Les erreurs techniques et l'absence d'image
+exploitable restent des erreurs, pas des notes de qualité.
+
+Après mise à jour du code : relancer AutoShort puis cliquer **Reprendre** sur une
+production arrêtée à l'étape images. Les étapes déjà validées sont conservées.

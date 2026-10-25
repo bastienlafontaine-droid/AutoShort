@@ -55,9 +55,14 @@ def final(ctx,llm,state):
        {'title':state['editorial']['script']['title']},Verdict,image=folder/'contact_sheet.jpg',temperature=0.1)
     ctx.artifact('export/final_visual_review.json',review)
     llm.unload()
-    if not review['accepted'] or review['score']<ctx.cfg['production']['min_visual_score']:
-        raise ReviewNeeded('Controle final visuel non valide: '+'; '.join(review['issues']))
-    return {'technical':technical,'visual':review}
+    threshold=ctx.cfg['production']['min_visual_score']
+    threshold=threshold/10 if threshold>10 else threshold
+    reservations=not review['accepted'] or review['score']<threshold
+    if reservations:
+        if state.get('images',{}).get('scoring')!='mean_quality_relevance_100':
+            raise ReviewNeeded('Controle final visuel non valide: '+'; '.join(review['issues']))
+        ctx.event('final','Reserves visuelles conservees dans le rapport; export disponible')
+    return {'technical':technical,'visual':review,'with_reservations':reservations}
 
 def report(ctx,state):
     folder=ctx.path/'export';folder.mkdir(exist_ok=True)
@@ -73,7 +78,7 @@ def report(ctx,state):
     title=html.escape(script.get('title',ctx.info['theme']))
     facts=''.join('<li>'+html.escape(c['text'])+'</li>' for c in dossier.get('dossier',{}).get('claims',[]))
     sources=''.join('<li><a href="'+html.escape(s['url'],quote=True)+'">'+html.escape(s['title'])+'</a></li>' for s in dossier.get('sources',[]))
-    detail=html.escape(json.dumps({'usage':ctx.usage,'final':state.get('final',{}),'editorial':state.get('editorial',{}).get('review',{})},ensure_ascii=False,indent=2))
+    detail=html.escape(json.dumps({'usage':ctx.usage,'final':state.get('final',{}),'editorial':state.get('editorial',{}).get('review',{}),'images':state.get('images',{})},ensure_ascii=False,indent=2))
     (folder/'quality_report.html').write_text(f'''<!doctype html><html lang="fr"><meta charset="utf-8"><title>{title}</title>
 <style>body{{font:16px system-ui;max-width:1000px;margin:40px auto;background:#101722;color:#e5edf5;padding:20px}}a{{color:#61d6be}}video{{max-height:650px;max-width:100%}}pre{{white-space:pre-wrap;background:#192331;padding:20px}}li{{margin:12px 0}}</style>
 <h1>{title}</h1><p>Production locale — validation automatique, publication manuelle.</p><video src="video.mp4" controls></video>
