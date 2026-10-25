@@ -312,3 +312,33 @@ Tests Python et DOM exécutés lors de cette modification. Le contrôle navigate
 reste non exécuté jusqu'au bout : Chromium est installé, mais son lancement est
 bloqué par le système d'exécution (`socket(): Operation not permitted`). La qualité
 réelle des générations et le parcours à la souris restent à vérifier sur Windows.
+
+
+## V2 cinematic (integration progressive)
+
+Cette branche ajoute une timeline de **plans** distincte des scenes narratives,
+avec IDs stables `s01-p01`, timing entier en frames base sur les durées TTS,
+mouvements Ken Burns easing (FFmpeg), et export `shot_timeline.json`.
+Les cinq étapes et la validation explicite des images sont conservées.
+
+En mode guidé, l'étape **Images** permet de régler un mouvement et un type
+de média (image animée ou génération vidéo locale) sur jusqu'à trois plans par scène.
+Seuls les plans effectivement créés selon la durée du TTS seront rendus.
+Ces choix sont conservés dans `live.json`, sans relancer les images.
+
+**I2V facultatif**, non activé par défaut : configurer
+`production.video_generation.enabled = true`, `workflow_path` vers un
+workflow **ComfyUI API** compatible avec les nœuds réellement installés, et
+démarrer ComfyUI sur `http://127.0.0.1:8188`. L'interface du provider
+requiert exactement un `LoadImage` et une sortie vidéo détectable.
+Le workflow détermine modèle, résolution, durée et autres paramètres.
+**Aucun modèle n'est installé ni téléchargé automatiquement.**
+La compatibilité GPU, le modèle I2V et la durée doivent être testés localement.
+Pour un clip inutilisable, absent, trop court ou sans workflow, le rendu
+retombe sur une image animée et enregistre le motif.
+
+**Limites actuelles** : il ne s'agit pas de la V2 complète du cahier des
+charges. Le son design avancé, la recherche d'archives, la parallaxe par carte
+de profondeur, la QA temporelle VLM, les thèmes de sous-titres et le diagnostic
+de VRAM sont encore à implémenter. Aucun test matériel RTX 5080 n'a été effectué
+dans cette branche. L'ancienne publication manuelle est conservée.
