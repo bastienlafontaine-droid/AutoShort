@@ -214,3 +214,12 @@ def proposal_image(rid:str,pid:str):
         live.check_image(folder,p['data'])
     except (ValueError,KeyError):raise HTTPException(404)
     return FileResponse(p['data']['path'],media_type='image/png')
+
+class ShotSettings(BaseModel):
+    shot_id: str
+    camera_movement: str
+    media_type: str = 'animated_image'
+
+@app.post('/api/runs/{rid}/shot-settings')
+def shot_settings(rid: str, body: ShotSettings):
+    return live_action(rid, live.configure_shot, body.shot_id, body.camera_movement, body.media_type)
