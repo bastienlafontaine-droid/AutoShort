@@ -97,7 +97,7 @@ def render(ctx,script,audio,images):
                                    'actual_media_type':media_kind,'fallback_reason':reason})
             scene_offset+=shot.duration_seconds
         shotlist=folder/f"shots_{n:02d}.txt"
-        shotlist.write_text(''.join(f"file '{shot.shot_id}.mp4'\\n" for shot in shots),encoding='utf-8')
+        shotlist.write_text(''.join(f"file '{shot.shot_id}.mp4'\n" for shot in shots),encoding='utf-8')
         silent=folder/f"scene_{n:02d}_silent.mp4"
         command(ctx,['ffmpeg','-hide_banner','-y','-f','concat','-safe','1','-i',str(shotlist),
                      '-c','copy',str(silent)])
