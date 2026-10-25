@@ -2,7 +2,7 @@ from pathlib import Path
 import pytest
 from autoshort import core
 from autoshort.pipeline import invalidate,verify_cached
-from autoshort.audio import word_error,captions
+from autoshort.audio import word_error,captions,spoken
 from autoshort.render import ts,ass_escape
 from autoshort.research import evidence_errors,safe_url
 
@@ -51,6 +51,14 @@ def test_private_urls_rejected(url):
 def test_word_error_normalizes_numbers():
     assert word_error('En 1912, tout change.','En mille neuf cent douze tout change')==0
     assert word_error('Cette histoire est vraie','Le chat dort')>.5
+
+def test_spoken_strips_markdown_emphasis():
+    assert spoken('outlets like *Le Canard enchaine* and *Valeurs Actuelles*.','en')=='outlets like Le Canard enchaine and Valeurs Actuelles.'
+    assert word_error('*Le Canard* picking it up','Le Canard picking it up','en')==0
+
+def test_captions_drop_markdown_markers():
+    caps,_=captions('Hello *world* today.',[{'word':'Hello','start':0,'end':0.2},{'word':'world','start':0.2,'end':0.5},{'word':'today','start':0.5,'end':0.9}],1)
+    assert all('*' not in c['text'] for c in caps)
 
 def test_caption_intervals_monotonic():
     caps,coverage=captions('un deux trois quatre cinq six sept huit neuf dix onze',[],7)

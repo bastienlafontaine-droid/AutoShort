@@ -2,8 +2,16 @@ import re
 from difflib import SequenceMatcher
 from .core import normalize
 
+def unwrap_markup(text):
+    """Retire emphase markdown pour que Kokoro ne lise pas 'asterisk'."""
+    text=re.sub(r'\*\*(.+?)\*\*',r'\1',text)
+    text=re.sub(r'\*(.+?)\*',r'\1',text)
+    text=re.sub(r'_(.+?)_',r'\1',text)
+    return re.sub(r'\s+',' ',text.replace('*',' ')).strip()
+
 def spoken(text,language="fr"):
     from num2words import num2words
+    text=unwrap_markup(text)
     text=re.sub(r'\b\d+\b',lambda m:num2words(int(m.group()),lang=language),text)
     return text
 
@@ -21,7 +29,7 @@ def word_error(expected,actual,language="fr"):
 
 def captions(narration,words,duration,offset=0.0):
     """Texte original, temps ASR quand correspondance; interpolation explicite sinon."""
-    original=narration.split(); source=[normalize(x) for x in original]
+    original=unwrap_markup(narration).split(); source=[normalize(x) for x in original]
     heard=[normalize(w['word']) for w in words]
     mapping={}
     for block in SequenceMatcher(None,source,heard,autojunk=False).get_matching_blocks():

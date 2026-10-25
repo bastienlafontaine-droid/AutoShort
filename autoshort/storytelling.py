@@ -36,7 +36,8 @@ def write_story(ctx,llm,research):
     dossier=research['dossier'];identity=research.get('event_scope',{})
     v3=ctx.cfg['production'].get('story_pipeline',2)>=3
     language=ctx.cfg['production'].get('language','fr')
-    language_rule=' Write all narration, titles and descriptions in natural spoken American English. Explain unfamiliar local acronyms briefly. No generic moral or abstract closing commentary.' if language=='en' else ' Ecris la narration en francais.'
+    language_rule=(' Write all narration, titles and descriptions in natural spoken American English. Explain unfamiliar local acronyms briefly. No generic moral or abstract closing commentary. No markdown, asterisks or italics; write publication names as plain spoken words.'
+                   if language=='en' else " Ecris la narration en francais. Pas de markdown ni d'asterisques; les titres de journaux se disent comme a l'oral.")
     key=fingerprint({'research':research,'version':3 if v3 else 2,'language':language})[:16]
     prefix='editorial/story_v2_'+key
     variants=[]

@@ -53,7 +53,10 @@ def audio_assets(ctx,llm,script):
             # Un seul changement global de debit; la duree n'est jamais corrigee en coupant des mots.
             speed=max(0.85,min(1.2,speed*total/((ctx.cfg['production']['min_seconds']+ctx.cfg['production']['max_seconds'])/2)));results={}
         else:speed=0.95
-    if len(results)!=len(scenes):raise ReviewNeeded('Audio non valide ou duree hors cible apres les reprises autorisees')
+    if len(results)!=len(scenes):
+        missing=[s['id'] for s in scenes if s['id'] not in results]
+        raise ReviewNeeded('Audio non valide ou duree hors cible apres les reprises autorisees'
+                           + (f' (scenes {missing})' if missing else ''))
     total=sum(x['duration'] for x in results.values())
     if not ctx.cfg['production']['min_seconds']<=total<=ctx.cfg['production']['max_seconds']:
         raise ReviewNeeded(f'Duree {total:.1f}s hors cible')
