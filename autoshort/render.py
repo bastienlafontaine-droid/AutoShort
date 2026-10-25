@@ -1,6 +1,6 @@
 import json, math, os, shutil, subprocess, time
 from pathlib import Path
-from .core import ROOT, dump, digest, ReviewNeeded
+from .core import ROOT, dump, digest, ReviewNeeded, Cancelled
 from .audio import captions
 from .cinematic import build_plan, camera_filter, MediaType
 from .video_provider import provider_from_config
@@ -102,6 +102,8 @@ def render(ctx,script,audio,images):
                                     timeout=int(video_cfg.get('timeout_seconds',600)),cancellation=ctx.check)
                                 video=destination
                                 break
+                            except Cancelled:
+                                raise
                             except Exception as exc:
                                 reason=f'ComfyUI attempt {attempt+1}: {type(exc).__name__}: {str(exc)[:130]}'
                                 ctx.event('render',reason)
@@ -112,8 +114,10 @@ def render(ctx,script,audio,images):
                         check=probe(video)
                         if not any(x.get('codec_type')=='video' for x in check.get('streams',[])):raise ValueError('No video stream')
                         if float(check.get('format',{}).get('duration',0)) + 0.02 < shot.duration_seconds:raise ValueError('Clip too short')
-                        command(ctx,['ffmpeg','-hide_banner','-y','-i',str(video),'-vf',f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps},format=yuv420p",'-an','-t',str(shot.duration_seconds),'-c:v','libx264','-preset','fast','-crf','20',str(clip)])
+                        command(ctx,['ffmpeg','-hide_banner','-y','-i',str(video),'-vf',f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},fps={fps},format=yuv420p",'-an','-frames:v',str(shot.frames),'-c:v','libx264','-preset','fast','-crf','20',str(clip)])
                         media_kind='generated_video'
+                    except Cancelled:
+                        raise
                     except Exception as exc:
                         reason='Video validation/render failed: '+str(exc)[:120]
                 else:reason='No validated local generated clip'
