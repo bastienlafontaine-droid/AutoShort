@@ -1,0 +1,32 @@
+name: AutoShort CPU regression tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - feat/cinematic-v2-local-media
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install CPU-only runtime for deterministic tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pytest>=8,<10" "pydantic>=2.10,<3" "fastapi>=0.115,<1" "httpx>=0.28,<1" "uvicorn>=0.34,<1" "filelock>=3.17,<4" "langgraph>=0.3,<2" "trafilatura>=2,<3" "Pillow>=11,<13" "numpy>=1.26,<3" "soundfile>=0.13,<1" "num2words>=0.5.14,<1"
+      - name: Python syntax
+        run: python -m compileall -q autoshort tests
+      - name: CPU test suite
+        env:
+          PYTHONPATH: .
+        run: python -m pytest -q
