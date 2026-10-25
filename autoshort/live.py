@@ -199,6 +199,8 @@ def select_video(folder,rid,shot_id,job_id):
         if not job:raise ValueError('Clip non disponible.')
         if w['image_choices'].get(str(job['target']))!=job['base']['image_id']:
             raise ValueError('Ce clip utilise une ancienne image.')
+        if w['image_choices'].get(str(job['target']))!=job['base']['image_id']:
+            raise ValueError('Ce clip utilise une ancienne image.')
         result=read(folder/'live_results'/f'{job_id}.json')
         check_video(folder,result)
         w.setdefault('video_choices',{})[shot_id]=job_id
@@ -238,6 +240,8 @@ def validate_images(folder,rid):
             p=proposal(w,'images',pid)
             if p['target']!=s['id']:raise ValueError('Image du mauvais plan.')
             check_image(folder,p['data'])
+        if any(j['kind']=='video' and j['status'] in ('queued','running') for j in w['jobs']):
+            raise ValueError('Terminer ou annuler les generations video avant de valider les images.')
         for shot_id,job_id in w.get('video_choices',{}).items():
             job=next((j for j in w['jobs'] if j['id']==job_id),None)
             if not job or job['base']['image_id']!=w['image_choices'].get(str(job['target'])):
