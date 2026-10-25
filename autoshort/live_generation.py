@@ -35,7 +35,8 @@ def generate(ctx,llm,job,w):
         threshold=score_100(ctx.cfg['production']['min_visual_score'])
         state={'research':read(ctx.path/'research.json'),'editorial':editorial,'audio':read(ctx.path/'audio.json'),
                'images':{'scenes':images,'threshold_100':threshold,'scoring':'mean_quality_relevance_100',
-                         'with_reservations':any(i['score_100']<threshold for i in images)}}
+                         'with_reservations':any(i['score_100']<threshold for i in images),
+                         'shot_overrides':w.get('shot_overrides',{})}}
         state['render']=ctx.stage('render',lambda:render(ctx,editorial['script'],state['audio'],state['images']))
         state['final']=ctx.stage('final',lambda:final(ctx,llm,state));report(ctx,state)
         return state['render']
