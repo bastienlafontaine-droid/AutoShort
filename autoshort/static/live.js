@@ -106,6 +106,23 @@ function showLive(parent,r){
       const ongoing=w.jobs.some(j=>j.stage==='images'&&j.target===plan.id&&j.status==='running');
       section.append(el('h4',`Plan ${plan.id} · ${items.length?'prêt':ongoing?'en cours':'en attente'}`),el('p',plan.narration),el('p',plan.visual,'muted'));
       if(active){const b=liveButton(section,'+ Nouvelle image',()=>liveEditor(r,'images',null,plan.id));b.setAttribute('aria-label',`Nouvelle image pour le plan ${plan.id}`);}
+      if(active){
+        const settings=el('div',undefined,'actions');section.append(settings);
+        const movementNames=['push_in','pull_out','pan_left','pan_right','tilt_up','tilt_down','diagonal','still','reveal'];
+        for(let i=1;i<=3;i++){
+          const shotId='s'+String(plan.id).padStart(2,'0')+'-p'+String(i).padStart(2,'0');
+          const opts=w.shot_overrides?.[shotId]||{};
+          const selector=el('select');selector.setAttribute('aria-label','Mouvement '+shotId);
+          for(const value of movementNames){const option=el('option',value);option.value=value;selector.append(option);}
+          selector.value=opts.camera_movement||movementNames[(plan.id+i-2)%movementNames.length];
+          const media=el('select');media.setAttribute('aria-label','Média '+shotId);
+          for(const value of ['animated_image','generated_video']){const option=el('option',value==='generated_video'?'Vidéo IA locale (si disponible)':'Image animée');option.value=value;media.append(option);}
+          media.value=opts.media_type||'animated_image';
+          const save=liveButton(settings,'Enregistrer '+i,()=>livePost(r,'shot-settings',{shot_id:shotId,camera_movement:selector.value,media_type:media.value}));
+          settings.append(selector,media);
+        }
+        section.append(el('small','Plans 1 à 3 possibles selon la durée réelle de la voix. Les réglages absents utilisent la réalisation automatique.','muted'));
+      }
       const grid=el('div',undefined,'proposal-images');section.append(grid);
       for(const p of items)liveCard(grid,r,'images',p,active);
       liveQueue(section,r,'images',plan.id);
