@@ -2,7 +2,7 @@ import json, math, os, shutil, subprocess, time
 from pathlib import Path
 from .core import ROOT, dump, digest, ReviewNeeded
 from .audio import captions
-from .cinematic import build_plan, camera_filter
+from .cinematic import build_plan, camera_filter, MediaType
 from .video_provider import provider_from_config
 
 def command(ctx,args,cwd=None):
@@ -79,7 +79,7 @@ def render(ctx,script,audio,images):
         scene_offset=0.0
         for shot in shots:
             if video_cfg.get('enabled',False) and not overrides and generated<video_budget and shot.importance>=85:
-                shot.media_type='generated_video'
+                shot.media_type=MediaType.generated_video
             clip=folder/f"{shot.shot_id}.mp4"
             movement=shot.camera_movement
             media_kind='animated_image'
