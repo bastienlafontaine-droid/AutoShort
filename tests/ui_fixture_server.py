@@ -1,7 +1,7 @@
 """Isolated browser-test server. AI stand-ins only; never points at user data.
 Run: python tests/ui_fixture_server.py (then node tests/browser_guided.cjs).
 """
-import asyncio,os,sys,tempfile,shutil,subprocess
+import asyncio,os,sys,tempfile,shutil,subprocess,time
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(root));sys.path.insert(0,str(root/'tests'))
@@ -10,8 +10,13 @@ os.environ['AUTOSHORT_ROOT']=workspace.name
 shutil.copy(root/'config.toml',Path(workspace.name)/'config.toml')
 from pytest import MonkeyPatch
 from test_guided import services
-from autoshort import api,core,pipeline
+from autoshort import api,core,pipeline,live_generation
+from test_live import fake_generator
 patch=MonkeyPatch();calls=services(patch)
+def progressive(ctx,llm,job,w):
+    if job['kind']=='proposal':time.sleep(3)
+    return fake_generator(ctx,llm,job,w)
+live_generation.generate=progressive
 api.diagnose=lambda:{'ok':True,'checks':[{'ok':True,'name':'Test interface','detail':'Services IA simules, donnees temporaires'}]}
 def render(ctx,script,audio,images):
     calls.append('render');folder=ctx.path/'export';folder.mkdir(exist_ok=True)

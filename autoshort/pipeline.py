@@ -8,7 +8,7 @@ from .core import Context,DATA,ROOT,ReviewNeeded,Cancelled,update,read,dump,dige
 from .llm import LLM
 from .research import discover,research
 from .editorial import write_script,build_storyboard
-from . import guided
+from . import guided,live
 from .assets import audio_assets,image_assets
 from .render import render,final_check,command
 from .schemas import Verdict
@@ -106,6 +106,9 @@ def execute(rid):
         ctx=Context(rid);llm=LLM(ctx);state={}
         update(rid,status='RUNNING',error='')
         try:
+            if not guided.is_auto(ctx.path) and live.enabled(ctx.path):
+                live.run(ctx,llm)
+                return
             verify_cached(ctx)
             if guided.is_auto(ctx.path):
                 graph=StateGraph(State)

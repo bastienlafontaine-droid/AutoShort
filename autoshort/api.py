@@ -8,7 +8,7 @@ from pydantic import BaseModel,Field
 from filelock import FileLock,Timeout
 from .core import ROOT,DATA,new_run,runs,run_info,update,read
 from .doctor import diagnose
-from . import guided
+from . import guided,live
 
 TOKEN=secrets.token_urlsafe(32)
 ALLOWED_ORIGINS={'http://127.0.0.1:8765','http://localhost:8765'}
@@ -66,6 +66,8 @@ async def protect(request:Request,call_next):
 def index():return FileResponse(Path(__file__).parent/'static'/'index.html')
 @app.get('/app.js')
 def js():return FileResponse(Path(__file__).parent/'static'/'app.js',media_type='text/javascript')
+@app.get('/live.js')
+def live_js():return FileResponse(Path(__file__).parent/'static'/'live.js',media_type='text/javascript')
 @app.get('/style.css')
 def css():return FileResponse(Path(__file__).parent/'static'/'style.css',media_type='text/css')
 @app.get('/api/session')
@@ -99,21 +101,31 @@ def details(rid:str):
     info=existing(rid);p=DATA/'runs'/rid/'events.jsonl'
     info['events']=[json.loads(l) for l in p.read_text(encoding='utf-8').splitlines()[-80:]] if p.exists() else []
     info['files']=[x.name for x in (DATA/'runs'/rid/'export').glob('*') if x.is_file() and x.suffix in ('.mp4','.jpg','.html','.json','.srt','.md','.txt') and not x.name.startswith(('scene_','assembled','sample_'))]
-    info['progress']=guided.progress(info,DATA/'runs'/rid)
+    folder=DATA/'runs'/rid
+    info['progress']=guided.progress(info,folder)
+    if not guided.is_auto(folder) and live.enabled(folder):
+        w=live.snapshot(folder)
+        info['progress']={'auto':False,'number':live.STAGES.index(w['stage'])+1,'live':w}
+        if any(j['kind']=='research' and j['status'] in ('queued','running') for j in w['jobs']):info['progress']['number']=1
     return info
 @app.post('/api/runs/{rid}/cancel')
 def cancel(rid:str):
     existing(rid)
-    with FileLock(str(DATA/'runs'/rid/'approval.lock'),timeout=5):
+    folder=DATA/'runs'/rid
+    lock_name='live.lock' if live.enabled(folder) and not guided.is_auto(folder) else 'approval.lock'
+    with FileLock(str(folder/lock_name),timeout=5):
         r=existing(rid)
         if r['status'] in ('QUEUED','AWAITING_APPROVAL'):update(rid,status='CANCELLED',cancel=1)
         elif r['status']=='RUNNING':update(rid,cancel=1)
     return {'ok':True}
 @app.post('/api/runs/{rid}/resume')
 def resume(rid:str):
-    r=existing(rid)
-    if r['status'] in ('RUNNING','QUEUED','READY','AWAITING_APPROVAL'):raise HTTPException(409,'Etat incompatible')
-    update(rid,status='QUEUED',error='',cancel=0)
+    existing(rid);folder=DATA/'runs'/rid
+    lock_name='live.lock' if live.enabled(folder) and not guided.is_auto(folder) else 'approval.lock'
+    with FileLock(str(folder/lock_name),timeout=5):
+        r=existing(rid)
+        if r['status'] in ('RUNNING','QUEUED','READY','AWAITING_APPROVAL'):raise HTTPException(409,'Etat incompatible')
+        update(rid,status='QUEUED',error='',cancel=0)
     return {'ok':True}
 @app.get('/api/runs/{rid}/files/{name}')
 def file(rid:str,name:str):
@@ -159,3 +171,46 @@ def preview_image(rid:str,scene:int,attempt:int):
     path=Path(candidate['path']).resolve()
     if not path.is_relative_to((folder/'images').resolve()) or not path.is_file():raise HTTPException(404)
     return FileResponse(path,media_type='image/png')
+
+
+class GenerateRequest(BaseModel):
+    stage:str
+    prompt:str=Field(min_length=1,max_length=6000)
+    target:int|None=None
+    base_id:str|None=None
+class ChooseRequest(BaseModel):
+    stage:str
+    proposal_id:str
+class EditRequest(ChooseRequest):
+    data:dict
+    prompt:str=Field(default='',max_length=6000)
+
+def live_action(rid,fn,*args):
+    existing(rid);folder=DATA/'runs'/rid
+    if guided.is_auto(folder) or not live.enabled(folder):raise HTTPException(409,'Action reservee au mode guide progressif.')
+    try:return fn(folder,rid,*args)
+    except (ValueError,KeyError,TypeError) as exc:raise HTTPException(422,str(exc))
+
+@app.post('/api/runs/{rid}/generate')
+def generate_proposal(rid:str,body:GenerateRequest):
+    return {'id':live_action(rid,live.request_generation,body.stage,body.prompt,body.target,body.base_id)}
+@app.post('/api/runs/{rid}/choose')
+def choose_proposal(rid:str,body:ChooseRequest):
+    live_action(rid,live.choose,body.stage,body.proposal_id);return {'ok':True}
+@app.post('/api/runs/{rid}/edit')
+def edit_proposal(rid:str,body:EditRequest):
+    return {'id':live_action(rid,live.edit,body.stage,body.proposal_id,body.data,body.prompt)}
+@app.post('/api/runs/{rid}/validate-images')
+def validate_image_choices(rid:str):
+    live_action(rid,live.validate_images);return {'ok':True}
+@app.post('/api/runs/{rid}/retry-job/{jid}')
+def retry_job(rid:str,jid:str):
+    live_action(rid,live.retry,jid);return {'ok':True}
+@app.get('/api/runs/{rid}/proposal-image/{pid}')
+def proposal_image(rid:str,pid:str):
+    existing(rid);folder=DATA/'runs'/rid
+    try:
+        p=live.proposal(live.snapshot(folder),'images',pid)
+        live.check_image(folder,p['data'])
+    except (ValueError,KeyError):raise HTTPException(404)
+    return FileResponse(p['data']['path'],media_type='image/png')

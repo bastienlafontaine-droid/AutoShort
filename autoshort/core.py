@@ -48,10 +48,13 @@ def new_run(theme, auto=True):
     p = DATA / "runs" / rid
     p.mkdir(parents=True)
     dump(p / "config.json", config())
-    dump(p / "request.json", {"theme": theme, "created": time.time(), "version": "0.1.0", "auto": auto})
+    dump(p / "request.json", {"theme": theme, "created": time.time(), "version": "0.1.0", "auto": auto, "guided_version": 2})
     with db() as conn:
         conn.execute("INSERT INTO runs(id,theme,status,step,created,updated) VALUES(?,?,?,?,?,?)",
                      (rid, theme, "QUEUED", "queued", time.time(), time.time()))
+    if not auto:
+        from .live import initialize
+        initialize(p)
     return rid
 
 def runs():

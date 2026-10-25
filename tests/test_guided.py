@@ -52,6 +52,12 @@ def services(monkeypatch):
 def harness(workspace,monkeypatch):
     for module in (pipeline,api):monkeypatch.setattr(module,'DATA',core.DATA)
     monkeypatch.setattr(api,'ROOT',core.ROOT)
+    original_new=core.new_run
+    def legacy_new(theme,auto=True):
+        rid=original_new(theme,auto=auto)
+        path=core.DATA/'runs'/rid/'request.json';request=core.read(path);request.pop('guided_version',None);core.dump(path,request)
+        return rid
+    monkeypatch.setattr(core,'new_run',legacy_new);monkeypatch.setattr(api,'new_run',legacy_new)
     calls=services(monkeypatch)
     client=TestClient(api.app)
     headers={'Origin':'http://127.0.0.1:8765','X-AutoShort-Token':api.TOKEN}

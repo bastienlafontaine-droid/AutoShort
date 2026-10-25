@@ -235,53 +235,80 @@ Après mise à jour du code : relancer AutoShort puis cliquer **Reprendre** sur 
 production arrêtée à l'étape images. Les étapes déjà validées sont conservées.
 
 
-## Mode guide (interface)
+## Mode guidé progressif
 
-La case **Auto**, a cote de **Creer une video**, est decochee par defaut.
-Le parcours guide comporte cinq etapes :
+La case **Auto**, à côté de **Créer une vidéo**, est décochée par défaut.
+Auto coché conserve l'enchaînement automatique, sans validation ni bouton +.
+La publication reste manuelle ; la CLI et les anciennes productions automatiques
+conservent leur fonctionnement.
 
-1. Choisir parmi les trois idees classees (titre, angle, note indicative sur 100).
-   La recherche approfondie commence seulement apres le choix. Si les preuves ne
-   tiennent pas, les autres idees sont reproposees avec le motif du rejet.
-2. Relire et modifier le titre, la description et la narration de chaque scene,
-   puis **Valider le script**. Les modifications humaines ne sont pas une nouvelle
-   certification factuelle ; conserver les faits du dossier.
-3. Corriger si besoin les descriptions et prompts des plans, puis **Valider les plans**.
-4. La voix et toutes les images sont produites sans autre interruption.
-   Choisir les images parmi les essais existants de chaque plan, puis
-   **Valider les images et monter le Short**.
-5. Le montage et ses controles s'executent ; lecteur, fichiers et rapport apparaissent.
+Le parcours guidé comporte cinq étapes :
 
-**Auto coche** conserve l'enchainement automatique. Les anciennes productions
-(sans champ `auto`) et la commande CLI `run` restent automatiques.
-La publication reste exclusivement manuelle.
+1. **Idées** : chaque sujet s'affiche dès qu'il est prêt, avec titre, angle et note
+   indicative sur 100. Trois propositions sont préparées. Choisir une idée lance
+   sa recherche approfondie. Si ses preuves ne tiennent pas, les autres restent
+   disponibles et les alternatives en attente reprennent.
+2. **Script** : la première narration complète s'affiche pendant la préparation
+   d'une deuxième version. Choisir, modifier ou utiliser **+**.
+3. **Découpage** : même fonctionnement, avec le texte dit, la description et le
+   prompt de chaque plan. **+ Ce plan** régénère uniquement ce plan dans une
+   nouvelle version du découpage, en conservant les autres plans et la narration.
+4. **Images** : les plans se remplissent un par un. Chaque plan propose **Retenir**,
+   **Modifier le prompt** et **+ Nouvelle image**. L'image suivante n'écrase pas
+   le choix retenu. La première image disponible est le choix par défaut.
+5. **Short** : **Valider l'ensemble des images** exige une image disponible par
+   plan, puis lance le montage et les contrôles. Le lecteur et le rapport restent
+   identiques au mode automatique.
 
-Les validations sont enregistrees dans `workflow.json`, separement des resultats
-produits. Une pause libere le worker et le verrou GPU, sans consommer le budget
-pendant l'attente. Arreter puis reprendre, ou redemarrer l'application, conserve
-les validations. **Reprendre** ne valide jamais une etape a votre place.
-Les fichiers media manquants/modifies invalident leurs dependances et redemandent
-la validation des images si necessaire. Les brouillons saisis dans l'interface
-sont conserves pendant son actualisation periodique, mais ne sont enregistres
-sur disque qu'en cliquant sur Valider.
+À toutes les étapes, **+** ouvre le prompt actuel, modifiable avant **Générer**.
+Modifier un texte puis enregistrer, valider ou relancer ajoute une version,
+sans effacer la précédente. Les anciennes propositions sont consultables dans
+les rubriques « propositions conservées ». Les versions modifiées ne reprennent
+pas une note calculée pour le texte précédent. La validation humaine n'est pas
+une certification factuelle.
 
-### Tests du mode guide
+Une seule unité de génération travaille à la fois, sous le verrou GPU existant.
+Une unité comprend la production d'une proposition et ses contrôles, ou une tâche
+technique (recherche, voix, montage). Les demandes **+** passent juste après l'unité
+en cours, dans l'ordre où elles ont été demandées, avant le remplissage automatique.
+Choisir ne coupe pas le calcul en cours : son résultat est conservé. Les variantes
+**automatiques encore en attente** de cette étape sont annulées. Les demandes
+manuelles déjà envoyées sont conservées et restent prioritaires.
 
-`python -m pytest tests -q` teste le parcours avec services IA/media simules,
-les modifications, le choix d'image, les erreurs/reprises, les refus de sujets,
-les validations perimees et le mode automatique.
+Le remplissage est borné : trois idées, deux scripts, deux découpages, puis le
+nombre d'essais configuré par image, en parcourant tous les plans avant le tour
+suivant. **+** permet de demander d'autres versions dans les budgets existants.
+La voix est mise en file après le choix du script, sans validation supplémentaire ;
+elle ne bloque pas la consultation du découpage ou des images. Le montage attend
+la validation des images et la disponibilité de la voix.
 
-Test navigateur optionnel (Playwright et Chromium installes separement) :
+La file, les versions et les choix sont enregistrés dans `live.json` sous verrou ;
+les résultats de chaque calcul ont un identifiant stable pour la reprise après
+interruption. Les propositions déjà affichées restent disponibles en cas d'erreur.
+**Réessayer** reprend un calcul en erreur ; **+** permet de modifier sa demande.
+**Arrêter / Reprendre** conserve les choix validés. Les anciens runs guidés de la
+première PR conservent leur ancien parcours à validations de lots, pour ne pas
+perdre leurs checkpoints. Créer une nouvelle production pour le mode progressif.
+
+### Vérifications
 
 ```shell
+python -m pytest tests -q
+# Contrôle DOM optionnel, sans navigateur (npm install jsdom) :
+node tests/live_dom.cjs
+# Parcours navigateur, avec Playwright et Chromium installés :
 python tests/ui_fixture_server.py
 # Dans un autre terminal :
 node tests/browser_guided.cjs
 ```
 
-Le serveur de test utilise un dossier temporaire, simule l'IA et genere un petit
-MP4 avec FFmpeg. Fermer l'application normale avant de le lancer sur le port 8765.
-Ce scenario ne mesure ni la qualite de generation ni la compatibilite GPU Windows.
-Lors de cette modification, les tests Python ont ete executes ; le test navigateur
-n'a pas pu etre execute (Chromium indisponible et navigateur distant sans acces au
-serveur local). La validation a la souris sur le poste Windows reste a faire.
+Le serveur de test utilise un dossier temporaire, simule l'IA et produit un vrai
+petit MP4 avec FFmpeg. Fermer l'application normale avant d'utiliser son port 8765.
+Le scénario navigateur couvre les arrivées progressives, les prompts éditables,
+la priorité des demandes, la conservation des variantes, le choix des images
+pendant le remplissage, le montage et le mode Auto.
+
+Tests Python et DOM exécutés lors de cette modification. Le contrôle navigateur
+reste non exécuté jusqu'au bout : Chromium est installé, mais son lancement est
+bloqué par le système d'exécution (`socket(): Operation not permitted`). La qualité
+réelle des générations et le parcours à la souris restent à vérifier sur Windows.
