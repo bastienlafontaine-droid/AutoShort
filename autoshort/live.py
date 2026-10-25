@@ -22,7 +22,7 @@ def enabled(folder):return read(folder/'request.json').get('guided_version')==2
 
 def initial():
     return {'version':2,'revision':0,'stage':'ideas','jobs':[],'proposals':{s:[] for s in STAGES},
-            'chosen':{},'image_choices':{},'rejected':{},'message':'','prompts':PROMPTS}
+            'chosen':{},'image_choices':{},'shot_overrides':{},'rejected':{},'message':'','prompts':PROMPTS}
 
 @contextmanager
 def transaction(folder):
@@ -126,6 +126,29 @@ def choose(folder,rid,stage,pid):
                     add_job(w,'images',target=scene['id'],prompt=scene['image_prompt'])
         else:raise ValueError('Etape inconnue.')
         wake(rid)
+
+VALID_MOVEMENTS={'push_in','pull_out','pan_left','pan_right','tilt_up','tilt_down','diagonal','still','reveal'}
+VALID_MEDIA={'animated_image','generated_video','archive_image','archive_video'}
+
+def configure_shot(folder,rid,shot_id,movement,media_type):
+    """Human overrides stay durable and never regenerate an accepted image."""
+    import re
+    with transaction(folder) as w:
+        require_active(w,'images')
+        if not re.fullmatch(r's[0-9]{2}-p0[1-3]',shot_id):
+            raise ValueError('Identifiant de plan invalide.')
+        board=proposal(w,'storyboard',w['chosen']['storyboard'])['data']['script']
+        scene=int(shot_id[1:3])
+        if scene not in [s['id'] for s in board['scenes']]:
+            raise ValueError('Scene inconnue.')
+        if movement not in VALID_MOVEMENTS or media_type not in VALID_MEDIA:
+            raise ValueError('Mouvement ou type de media invalide.')
+        # Archive media require a verified import; do not mislabel synthetic art.
+        if media_type.startswith('archive_'):
+            raise ValueError('Importer et verifier une archive avant de la selectionner.')
+        w.setdefault('shot_overrides',{})[shot_id]={
+            'camera_movement':movement,'media_type':media_type}
+        return {'ok':True}
 
 def check_image(folder,data):
     p=Path(data['path']).resolve()
