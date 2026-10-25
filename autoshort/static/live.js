@@ -1,6 +1,6 @@
 /* Progressive cards and a separate persistent editor: polling never resets typed text. */
 const liveStageNames={ideas:'Idées',script:'Script',storyboard:'Découpage',images:'Images',short:'Short'};
-const liveJobNames={proposal:'Proposition',research:'Recherche et sources',audio:'Préparation de la voix',render:'Montage du Short'};
+const liveJobNames={proposal:'Proposition',research:'Recherche et sources',audio:'Préparation de la voix',video:'Vidéo IA locale',render:'Montage du Short'};
 const archiveOpen=new Set();
 async function livePost(r,path,body={}){
   try{const result=await api(`/api/runs/${r.id}/${path}`,body);renderedStatus='';await refresh();return result;}
@@ -109,25 +109,40 @@ function showLive(parent,r){
       if(active){
         const settings=el('div',undefined,'actions');section.append(settings);
         const movementNames=['push_in','pull_out','pan_left','pan_right','tilt_up','tilt_down','diagonal','still','reveal'];
-        for(let i=1;i<=3;i++){
-          const shotId='s'+String(plan.id).padStart(2,'0')+'-p'+String(i).padStart(2,'0');
+        const actualShots=(w.measured_shots||[]).filter(x=>x.scene_id===plan.id);
+        if(!actualShots.length)section.append(el('p','Les plans cinématographiques apparaîtront dès la fin de la préparation de la voix.','muted'));
+        for(const measured of actualShots){
+          const shotId=measured.shot_id;
           const opts=w.shot_overrides?.[shotId]||{};
           const selector=el('select');selector.setAttribute('aria-label','Mouvement '+shotId);
           for(const value of movementNames){const option=el('option',value);option.value=value;selector.append(option);}
-          selector.value=opts.camera_movement||movementNames[(plan.id+i-2)%movementNames.length];
+          selector.value=opts.camera_movement||measured.camera_movement;
           const media=el('select');media.setAttribute('aria-label','Média '+shotId);
           for(const value of ['animated_image','generated_video']){const option=el('option',value==='generated_video'?'Vidéo IA locale (si disponible)':'Image animée');option.value=value;media.append(option);}
           media.value=opts.media_type||'animated_image';
-          const save=liveButton(settings,'Enregistrer '+i,()=>livePost(r,'shot-settings',{shot_id:shotId,camera_movement:selector.value,media_type:media.value}));
-          settings.append(selector,media);
+          const save=liveButton(settings,'Enregistrer '+shotId,()=>livePost(r,'shot-settings',{shot_id:shotId,camera_movement:selector.value,media_type:media.value}));
+          settings.append(el('small',shotId+' · '+measured.duration_seconds.toFixed(2)+'s','muted'),selector,media);
+          if(w.image_choices[String(plan.id)]){
+            liveButton(settings,'+ Clip IA '+shotId,async()=>{
+              const prompt=window.prompt('Prompt de mouvement pour '+shotId,'subtle cinematic motion, preserve image composition and character identity');
+              if(prompt)await livePost(r,'generate-video',{shot_id:shotId,prompt});
+            },!w.image_choices[String(plan.id)]);
+          }
+          for(const clip of Object.values(w.video_catalog||{}).filter(v=>v.shot_id===shotId && v.image_id===w.image_choices[String(plan.id)])){
+            const preview=el('video');preview.controls=true;preview.preload='metadata';preview.width=130;
+            preview.src='/api/runs/'+r.id+'/proposal-video/'+clip.job_id;
+            settings.append(preview);
+            const selected=w.video_choices?.[shotId]===clip.job_id;
+            liveButton(settings,selected?'✓ Clip sélectionné':'Retenir ce clip',()=>livePost(r,'choose-video',{shot_id:shotId,job_id:clip.job_id}));
+          }
         }
-        section.append(el('small','Plans 1 à 3 possibles selon la durée réelle de la voix. Les réglages absents utilisent la réalisation automatique.','muted'));
+        section.append(el('small','Plans déterminés à partir de la durée réelle de la voix. Génération vidéo optionnelle, avant validation des Images.','muted'));
       }
       const grid=el('div',undefined,'proposal-images');section.append(grid);
       for(const p of items)liveCard(grid,r,'images',p,active);
       liveQueue(section,r,'images',plan.id);
     }
-    if(active)liveButton(area,'Valider l’ensemble des images',()=>livePost(r,'validate-images'),!(board?.scenes.every(s=>w.image_choices[String(s.id)])));
+    if(active)liveButton(area,'Valider l’ensemble des images',()=>livePost(r,'validate-images'),!(board?.scenes.every(s=>w.image_choices[String(s.id)])) || w.jobs.some(j=>j.kind==='video'&&['running','queued'].includes(j.status)));
   }else{
     if(active&&stage!=='short')liveButton(area,'+ Nouvelle proposition',()=>liveEditor(r,stage));
     const cards=el('div',undefined,'proposal-list');area.append(cards);
