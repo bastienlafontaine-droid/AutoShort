@@ -81,6 +81,8 @@ def test_video_requires_enabled_backend_and_real_audio(tmp_path, monkeypatch):
     core.dump(folder / "config.json", cfg)
     with pytest.raises(ValueError, match="Activer"):
         live.schedule_video(folder, "run", "s01-p01", "gentle camera movement")
+    cfg["production"]["video_generation"]["enabled"] = True
+    core.dump(folder / "config.json", cfg)
     (folder / "audio.json").unlink()
     with pytest.raises(ValueError, match="voix"):
         live.schedule_video(folder, "run", "s01-p01", "gentle camera movement")
